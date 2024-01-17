@@ -1,0 +1,481 @@
+---
+title: "down_script" 
+format: html 
+editor: visual 
+---
+
+# Single Cell RNA-seq of control and Down Syndrome cortical organoids {style="background-image: linear-gradient(#051650,  #1e4620); color: #dddddd; border-width: 5px; border-style: solid; border-color: #051650; padding-top: 15px;   padding-right: 15px; padding-bottom: 15px;   padding-left: 15px"}
+
+This code will explain all the steps we took to analyze the single cell RNA-seq post mortem control and down sundrome brain transcriptomic data from \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_.
+
+This is a project by: Pedro Henrique Prado de Oliveira
+
+Oriented by:
+
+Co-oriented by: André Luiz Teles e Silva, Bruna Zampieri
+
+### Cleaning environment {style="background-color: #DDDDDD; color: #000000; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# echo: false       # disables printing of code (only output is displayed)  # Ctrl + L          # clears console  
+rm(list = ls())     # clears Environment 
+```
+
+### Library importation {style="background-color: #DDDDDD; color: #000000; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+library(tidyverse)  
+library(Seurat) 
+library(metap)
+```
+
+### Creating directories for images and results {style="background-color: #DDDDDD; color: #000000; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+if (!file.exists("images")){   
+  dir.create("images")
+  dir.create("images/pre_processing")
+  dir.create("images/expl_analysis")
+  dir.create("images/clustering")
+  dir.create("images/cell_composition")
+  dir.create("images/basic_expression")
+  dir.create("images/dif_exp")   
+}
+```
+
+# Data wrangling {style="background-color: #051650; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+### Structuring {style="background-color: #0049b7; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Data importation {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+
+########## colocar todos os dados no github e acessar por lá
+
+# Raw counts
+counts <- list()
+counts$SRR18819171 <- Read10X("D:/bioinfo/Down/data/SRR18819171_counts/")
+counts$SRR18819172 <- Read10X("D:/bioinfo/Down/data/SRR18819172_counts/")
+counts$SRR18819173 <- Read10X("D:/bioinfo/Down/data/SRR18819173_counts/")
+counts$SRR18819174 <- Read10X("D:/bioinfo/Down/data/SRR18819174_counts/")
+
+# Separate objects
+seurats <- list()
+seurats$s1 <- CreateSeuratObject(counts = counts$SRR18819171, project = "s1DS")
+seurats$s2 <- CreateSeuratObject(counts = counts$SRR18819172, project = "s2DS")
+seurats$s3 <- CreateSeuratObject(counts = counts$SRR18819173, project = "s3CT")
+seurats$s4 <- CreateSeuratObject(counts = counts$SRR18819174, project = "s4CT")
+
+# Genes of interest (Complement systemn)
+intGenes <- read.csv("D:/bioinfo/Down/genes_down.csv", sep = ";")
+
+```
+
+##### Merging samples {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Merging Seurat objects
+# add.cell.ids is used to help name each cell after merging so we can associate each to a specfic run
+orgs <- merge(
+  x = seurats$s1, 
+  y = c(seurats$s2, seurats$s3, seurats$s4), 
+  add.cell.ids = c("s1DS", "s2DS", "s3CT", "s4CT"), 
+  project = "allRuns"
+)
+```
+
+##### Adjusting cell metadata {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# (Two different ways were used to create a new metadata column, for demonstration)
+
+# Creating a condition column in metadata
+orgs@meta.data$condition <- substr(orgs@meta.data$orig.ident, 3, 4)
+orgs@meta.data$condition <- factor(orgs@meta.data$condition)
+
+# Creaitng mitochondrial reads percentage column in metadata
+orgs[["percent.mt"]] <- PercentageFeatureSet(orgs, pattern = "^MT-")
+```
+
+### Pre-processing {style="background-color: #0049b7; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Quality control {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+Removing cells
+
+NOTE: Be careful removing cell with high pct of mt mapped reads because they could just be a high metabolism cluster cell type, and not dying cells necessarily.
+
+```{r}
+# Number of cells before quality control
+print(paste0("Number of cells before QC: ", nrow(orgs@meta.data)))
+# Plotting: features, reads, and percent mt reads before QC
+VlnPlot(orgs, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+# Plotting: nCount vs nFeatures and nCount vs percent.mt before QC
+plot1 <- FeatureScatter(orgs, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(orgs, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+
+# 200 < Number of reads per cell < 90,000
+orgs <- subset(orgs, subset = nCount_RNA > 200 & nCount_RNA < 60000)
+
+# 1000 < Number of features per cell < 2500
+orgs <- subset(orgs, subset = nFeature_RNA > 1000 & nFeature_RNA < 10000)
+
+# Percentage of reads mapped to mitochondrial genes < 5% 
+orgs <- subset(orgs, subset = percent.mt < 10)
+
+
+
+# Number of cells after quality control
+print(paste0("Number of cells after QC: ", nrow(orgs@meta.data)))
+# Plotting: features, reads, and percent mt reads after QC
+VlnPlot(orgs, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+# Plotting: nCount vs nFeatures and nCount vs percent.mt after QC
+plot1 <- FeatureScatter(orgs, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(orgs, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+
+Removing genes
+
+```{r}
+# Removing mitochondrial genes
+orgs <- orgs[!grepl("MT-", rownames(orgs)),]
+
+# Removing ribosomal genes
+
+
+# Removing non-protein coding genes
+
+
+# Removing genes with less than ___ counts
+
+
+```
+
+##### Normalizing counts {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Default "LogNormalize" method
+orgs <- NormalizeData(orgs)
+
+# "SCTransform" normalization method. Alternative for problems with global-scaling normalization methods
+# SCTransform()
+```
+
+##### Identifying highly variable features {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Indentifies 2000 festures (genes) that vary expression the most between cells
+orgs <- FindVariableFeatures(orgs, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(orgs), 10)
+
+# Plot variable features with and without labels
+plot1 <- VariableFeaturePlot(orgs) + ggtitle("All genes")
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE) + 
+  ggtitle("Top 10 highly variable genes")
+plot3 <- LabelPoints(plot = plot1, points = intGenes$genesofinterest, repel = TRUE) + 
+  ggtitle("Genes associated with DS") #+
+  #geom_text(color = "#00aaff")
+plot1 + plot2
+plot1 + plot3
+ggsave("D:/bioinfo/Down/images/pre_processing/variableFeatures.png", plot = plot1 + plot2 + plot3, width = 15, height = 8)
+```
+
+##### Scaling the data {style="background-color: #00aaff; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+all.genes <- rownames(orgs)
+orgs <- ScaleData(orgs, features = all.genes)
+
+intGenes$genesofinterest %in% all.genes
+```
+
+# Exploratory analysis {style="background-color: #1e4620; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+### Dimensionality reduction {style="background-color: #449944; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Defining number of PCs {style="background-color: #abf7b1; color: #777700; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px;"}
+
+```{r}
+# Running PCA (for 2000 features as defined in FindVariableFeatures)
+orgs <- RunPCA(orgs, features = VariableFeatures(object = orgs))
+
+# Plotting heatmaps to help define how many PCs will be used in downstream analysis
+# num of dims is arbitrary and should be tested and adjusted. Num of cells too.
+DimHeatmap(orgs, dims = 1:15, cells = 500, balanced = TRUE)
+
+# Plotting Elbow plot to help define how many PCs will be used in downstream analysis
+ElbowPlot(orgs, ndims = 50)
+```
+
+##### Running UMAP {style="background-color: #abf7b1; color: #777700; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px;"}
+
+```{r}
+
+orgs <- RunUMAP(orgs, dims = 1:50, n.neighbors = 50, min.dist = 0.5)
+```
+
+##### Batch effect verification {style="background-color: #abf7b1; color: #777700; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px;"}
+
+```{r}
+# Plotting PCA plots
+# Looking at samples
+DimPlot(orgs, reduction = "pca", group.by = c("orig.ident"), pt.size = 1) +
+  ggtitle("PCA of all cells") +
+  xlab(paste0("PC1: ", round(orgs@reductions[["pca"]]@stdev[1], 2), "% variance")) +
+  ylab(paste0("PC2: ", round(orgs@reductions[["pca"]]@stdev[2], 2), "% variance")) + 
+  labs(color = "Sample") + # Title of the legend
+  coord_fixed()
+
+# Looking at condition
+DimPlot(orgs, reduction = "pca", group.by = c("condition"), pt.size = 1) +
+  ggtitle("PCA of all cells") +
+  xlab(paste0("PC1: ", round(orgs@reductions[["pca"]]@stdev[1], 2), "% variance")) +
+  ylab(paste0("PC2: ", round(orgs@reductions[["pca"]]@stdev[2], 2), "% variance")) + 
+  labs(color = "Condition") + # Title of the legend
+  coord_fixed()
+
+# Plotting UMAP plots
+# Looking at samples
+DimPlot(orgs, reduction = "umap", group.by = c("orig.ident"), pt.size = 1) +
+  ggtitle("UMAP with all cells") +
+  labs(color = "Sample") +
+  coord_fixed() #+
+  #theme(text = element_text(size = 25))
+
+# Looking at condition
+umapCondition <- DimPlot(orgs, reduction = "umap", group.by = c("condition"), pt.size = 1) +
+  ggtitle("UMAP with all cells") +
+  labs(color = "Condition") +
+  coord_fixed() #+
+  #theme(text = element_text(size = 25))
+umapCondition
+
+```
+
+# Cell types {style="background-color: #990000; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+### Clustering {style="background-color: #cc0000; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Finding clusters {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+orgs <- FindNeighbors(orgs, dims = 1:50)
+orgs <- FindClusters(orgs, resolution = 0.5)
+
+clusters <- DimPlot(orgs, reduction = "umap", group.by = c("seurat_clusters"), pt.size = 1, label = TRUE) +
+  ggtitle("UMAP with all cells") +
+  labs(color = "Cell type\ncluster") +
+  coord_fixed()
+
+clusters
+#umapCondition|clusters # View both side by side
+```
+
+##### Finding cell type markers (FindConservedMarkers) {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Verifying assay type. Should be RNA
+DefaultAssay(orgs)
+
+# Find conserved markers is more adquate beacause there are the same cell types from different coditions (Down syndrome and control)
+markers <- list()
+
+for (i in 1:nlevels(orgs$seurat_clusters)){
+  markers[[paste0("cluster",i-1)]] <- FindConservedMarkers(orgs, ident.1 = i-1, grouping.var = "condition", only.pos = TRUE)
+}
+
+# Compare with other functions
+
+```
+
+Plotting
+
+```{r}
+# Loop to feature plot top markers for every cluster
+for (i in 1:length(markers)){
+  featuresplot <- FeaturePlot(orgs, features = rownames(head(markers[[i]], 12)), min.cutoff = "q10")
+  ggsave(paste0("D:/bioinfo/Down/images/clustering/cluster", i-1, "markers.png"), plot = featuresplot, height = 10, width = 20)
+}
+
+# Loop to violin plot top markers for every cluster
+for (i in 1:length(markers)){
+  violin <- VlnPlot(orgs, features = rownames(head(markers[[i]], 12)))
+  ggsave(paste0("D:/bioinfo/Down/images/clustering/cluster", i-1, "violin.png"), plot = violin, height = 15, width = 35)
+}
+```
+
+q10 is quantile = 10% cut-off for grey or blue color
+
+##### Observing known cell type markers (literature) {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+
+# Astrocytes markers
+violin <- VlnPlot(orgs, features = c("GFAP","ALDH1L1","GLUL","S100B","CD44","VIM"))
+ggsave("D:/bioinfo/Down/images/clustering/astrocyteMarkers.png", plot = violin, height = 15, width = 35)
+```
+
+##### Automatic cell type classification (scType DB) {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+
+```
+
+##### Cell type annotation {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Renaming
+cellTypes <- c("neu1","neu2","oligo","","","","Astro","","","inhNeu","","oliPrec")
+names(cellTypes) <- levels(orgs)
+orgs <- RenameIdents(orgs, cellTypes)
+
+# Plotting final cluster
+clusters <- DimPlot(orgs, reduction = "umap", group.by = c("seurat_clusters"), pt.size = 1, label = TRUE) +
+  #NoLegend() +
+  ggtitle("UMAP with all cells") +
+  labs(color = "Cell type") +
+  coord_fixed()
+
+clusters
+```
+
+### Cell type composition {style="background-color: #cc0000; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Plotting by sample {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Transforming cluster and sample columns into table format
+tab_samp <- as.data.frame.matrix(table(orgs@meta.data$seurat_clusters, orgs@meta.data$orig.ident))
+
+# Creating percentage df
+pct_samp <- as.data.frame(prop.table(as.matrix(tab_samp), margin = 2) * 100)
+pct_samp$cluster <- rownames(pct_samp)
+
+# Convert the data to long format
+long_df <- pct_samp %>%
+  pivot_longer(cols = -cluster, names_to = "sample", values_to = "percentage")
+
+# Plot the bar plot
+ggplot(long_df, aes(x = sample, y = percentage, fill = factor(cluster))) +
+  geom_bar(stat = "identity") +
+  #geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            #position = position_stack(vjust = 0.5),
+            #size = 3, 
+            #color = "black") +
+  labs(title = "Cell type composition between samples",
+       x = "Sample",
+       y = "Percentage",
+       fill = "Cell type") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal()
+```
+
+##### Plotting by condition {style="background-color: #ff7f7f; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+
+# Transforming cluster and sample columns into table format
+tab_samp <- as.data.frame.matrix(table(orgs@meta.data$seurat_clusters, orgs@meta.data$condition))
+
+# Creating percentage df
+pct_samp <- as.data.frame(prop.table(as.matrix(tab_samp), margin = 2) * 100)
+pct_samp$cluster <- rownames(pct_samp)
+
+# Convert the data to long format
+long_df <- pct_samp %>%
+  pivot_longer(cols = -cluster, names_to = "condition", values_to = "percentage")
+
+# Plot the bar plot
+ggplot(long_df, aes(x = condition, y = percentage, fill = factor(cluster))) +
+  geom_bar(stat = "identity") +
+  #geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            #position = position_stack(vjust = 0.5),
+            #size = 3, 
+            #color = "black") +
+  labs(title = "Cell type composition between condition",
+       x = "condition",
+       y = "Percentage",
+       fill = "Cell type") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal()
+```
+
+# Basic expression analysis {style="background-color: #240032; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+### Genes of interest for DS {style="background-color: #7b00b6; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Violin plot {style="background-color: #b19cd0; color: #FFF685; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# All interest DS genes
+violin <- VlnPlot(orgs, features = intGenes$genesofinterest, split.by = "condition")
+ggsave("D:/bioinfo/Down/images/basic_expression/violin.png", plot = violin, height = 15, width = 35)
+
+# Just MASP1 gene (testing)
+VlnPlot(orgs, features = c("MASP1"), split.by = "condition")
+```
+
+# Differential expression analysis {style="background-color: #ffba01; color: #FFF685;  padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+### Comparing cell types in CONTROL {style="background-color: #ffe800; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 3 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 3 and 4 {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Groups
+
+# Individual cells
+
+```
+
+### Comparing cell types in DOWN SYNDROME {style="background-color: #ffe800; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 2 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Samples 1 and 2 {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Groups
+
+# Individual cells
+
+```
+
+### Comparing conditions for each cell type {style="background-color: #ffe800; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 vs 3 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 vs 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 2 vs 3 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 2 vs 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 and 2 vs 3 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 and 2 vs 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 vs 3 and 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 2 vs 3 and 4 (proof of method) {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+##### Sample 1 and 2 vs 3 and 4 {style="background-color: #ffffaa; color: #555500; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
+
+```{r}
+# Groups
+
+# Individual cells
+
+```
