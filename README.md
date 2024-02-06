@@ -12,4 +12,4 @@ The bulk RNA-seq data used for the analysis is from:
 ###
 Ponroy Bally, B., Farmer, W. T., Jones, E. V., Jessa, S., Kacerovsky, J. B., Mayran, A., ... & Murai, K. K. (2020). Human iPSC-derived Down syndrome astrocytes display genome-wide perturbations in gene expression, an altered adhesion profile, and increased cellular dynamics. Human Molecular Genetics, 29(5), 785-802. https://doi.org/10.1093/hmg/ddaa003
 
-### To view the reports download the raw file and open it with your browser of choice.
+### To view the cell ranger's html reports, download the raw file and open it with your browser of choice.
