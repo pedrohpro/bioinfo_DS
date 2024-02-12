@@ -1,0 +1,824 @@
+---
+title: "bulkDS_script"
+format: 
+  html: 
+    toc: TRUE
+editor: visual
+author:
+  - Pedro Henrique Prado de Oliveira
+---
+
+```{r, echo = FALSE}
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{css, echo = FALSE}
+
+#title h1 {
+  background-image: #ffffff; 
+  border-radius: 20px;
+  border-width: 4px;
+  border-color: #000000;
+  color: #000000; 
+  border-width: 5px; 
+  border-style: solid; 
+  border-color: #051650; 
+  padding-top: 15px;   
+  padding-right: 15px; 
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#title h2 {
+  background-color: #DDDDDD; 
+  color: #000000; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#dw h1 {
+  background-color: #051650; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#dw h2 {
+  background-color: #0049b7; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#dw h3 {
+  background-color: #00aaff; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#deseq h1 {
+  background-image: linear-gradient(#051650,  #1e4620); 
+  border-radius: 15px; 
+  color: #dddddd; 
+  border-width: 5px; 
+  border-style: solid; 
+  border-color: #051650; 
+  padding-top: 15px;   
+  padding-right: 15px; 
+  padding-bottom: 15px;   
+  padding-left: 15px
+}
+
+#exp h1 {
+  background-color: #1e4620; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#exp h2 {
+  background-color: #449944; 
+  color: #FFF685; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#exp h3 {
+  background-color: #abf7b1; 
+  color: #777700; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#basic h1 {
+  background-color: #240032; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#basic h2 {
+  background-color: #7b00b6; 
+  color: #FFF685; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#dea h1 {
+  background-color: #ffba01; 
+  color: #FFF685;  
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#dea h2 {
+  background-color: #ffe800; 
+  color: #555500; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#gsea h1 {
+  background-color: #583001; 
+  color: #ffffff; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+
+#gsea h2 {
+  background-color: #d97602; 
+  color: #ffffff; 
+  padding-top: 15px;   
+  padding-right: 15px;   
+  padding-bottom: 15px;   
+  padding-left: 15px;
+  border-radius: 15px
+}
+```
+
+# Bulk RNA-seq of Down Syndrome Astrocytes {#title}
+
+This code will explain all the steps we took to analyze the bulk RNA-seq data from control and down syndrome astrocytes.
+
+The raw data belongs to:
+
+Ponroy Bally, B., Farmer, W. T., Jones, E. V., Jessa, S., Kacerovsky, J. B., Mayran, A., ... & Murai, K. K. (2020). Human iPSC-derived Down syndrome astrocytes display genome-wide perturbations in gene expression, an altered adhesion profile, and increased cellular dynamics. *Human Molecular Genetics*, *29*(5), 785-802. [DOI](https://doi.org/10.1093/hmg/ddaa003)
+
+This is a project by: **Pedro Henrique Prado de Oliveira**
+
+```{r, echo = FALSE}
+# Ctrl + L          # clears console   
+rm(list = ls())     # clears Environment 
+```
+
+## Library importation
+
+```{r}
+library(tidyverse)
+library(DESeq2)  
+library(ComplexHeatmap)
+library(data.table)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(biomaRt)
+library(RColorBrewer)
+library(ggrepel)
+library(umap)
+library(pheatmap)
+library(mdp)
+library(kableExtra)
+library(fgsea)
+library(readxl)
+library(ggvenn)
+library(clusterProfiler)
+
+install.packages("conflicted")
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
+conflict_prefer("select", "dplyr")
+
+install.packages(c("biomaRt", "dbplyr"))
+```
+
+# Data wrangling {#dw}
+
+## Structuring
+
+### data importation
+
+All data was obtained from PRJNA600245 / SRP240925. The FastQs were downloaded with SRA-toolkit, then processed with FastQC, MultiQC, FastP, STAR and FeatureCounts. Futher details are specified in the paper.
+
+**Counts Matrix**
+
+```{r}
+# importation (better way?)
+cts <- as.data.frame(as.matrix(fread("counts.out", skip = 1, sep = "\t"), rownames = 1, colnames = 1))
+
+# removing unecessary columns (gene location, etc.)
+cts <- cts[,grepl("SRR", colnames(cts))]
+
+# correcting columns names (generalizar!!!)
+colnames(cts) <- substring(colnames(cts), 6, 16)
+
+# Tranforming all cts columns into numeric
+cts <- mutate_all(cts, as.numeric)
+
+# Adding gene name next to ENSEMBL id with biomaRt
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+ensembl_ids <- c("ENSG00000279928")#rownames(cts)
+gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+                   filters = "ensembl_gene_id",
+                   values = ensembl_ids,
+                   mart = ensembl)
+
+rownames(cts) <- paste0(rownames(cts), "|", getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name"),
+  filters = "ensembl_gene_id",
+  values = rownames(cts),
+  mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+))
+
+# Adding gene name next to ENSEMBL id with annoationDbi
+rownames(cts) <- paste0(rownames(cts), "|", mapIds(
+  org.Hs.eg.db, 
+  keys = rownames(cts),
+  keytype = "ENSEMBL",
+  column = "SYMBOL"
+  ))
+
+# Remove all features named as NA
+cts <- cts[substring(rownames(cts), 17) != "NA",]
+
+# Duplicated gene names are added together
+cts <- as.matrix(cts) # to be able to have duplicated rownames
+rownames(cts) <- substring(rownames(cts), 17)
+cts <- rowsum(cts, rownames(cts))
+cts <- as.data.frame(cts)
+
+```
+
+**Metadata**
+
+```{r}
+# importation
+meta <- read.delim("sample_metadata.txt", sep = ",", row.names = 1)
+
+# removing unecessary columns (variables)
+meta <- meta[,c("Age","BIOMATERIAL_PROVIDER","BioSample","differentiation_protocol","disease","isolate")]
+
+# Changing "disease" column name to "condition"
+colnames(meta)[colnames(meta) == "disease"] <- "condition"
+colnames(meta)[colnames(meta) == "isolate"] <- "donor"
+
+# Changing "Control" to "CT" and "Down Syndrome" to "DS"
+meta$condition[meta$condition == "Control"] <- "CT"
+meta$condition[meta$condition == "Down syndrome"] <- "DS"
+
+# Tranforming all meta columns into factors
+meta <- mutate_all(meta, as.factor)
+meta$condition <- relevel(meta$condition, ref = "CT") # compare against control
+```
+
+**Genes of interest**
+
+```{r}
+# importation
+down_genes <- read.csv("genes_down.csv", sep = ";")
+intGenes <- down_genes$genesofinterest
+
+# Matrix of genes of interest
+#View(cts[which(rownames(cts) %in% intGenes),])
+```
+
+**Original paper's DE results**
+
+```{r}
+res_orig <- read_excel("paper_DE.xlsx")
+res_orig <- drop_na(res_orig)
+
+orig_degs_df <- res_orig[abs(res_orig$log2FoldChange) > 1 & res_orig$padj < 0.05,]
+orig_degs_df <- orig_degs_df[order(-abs(orig_degs_df$log2FoldChange)),]
+
+degs_orig <- orig_degs_df$gene
+top20_orig <- orig_degs_df$gene[1:20]
+```
+
+## Pre-processing
+
+### Quality control
+
+```{r}
+# Basic gene filtering: more than __ reads for a gene for all samples
+cts <- cts[rowSums(cts) > 10,]
+
+# Filtering in results DESeq2: independent filtering
+```
+
+## Collapsing replicates
+
+```{r}
+# Meta collapsed
+meta_collapsed <- meta[,c("Age","BIOMATERIAL_PROVIDER","condition","donor")]
+meta_collapsed <- meta_collapsed[!duplicated(meta$donor),]
+rownames(meta_collapsed) <- meta_collapsed$donor
+meta_collapsed <- subset(meta_collapsed, select = -donor)
+
+# cts collapsed (improve)
+cts_collapsed <- data.frame(matrix(nrow = nrow(cts), ncol = nlevels(meta$donor)))
+colnames(cts_collapsed) <- levels(meta$donor)
+rownames(cts_collapsed) <- rownames(cts)
+for (i in levels(meta$donor)) {
+  cts_collapsed[,i] <- rowSums(cts[, meta$donor == i])
+}
+
+# Re-ordering meta_collapsed rows
+meta_collapsed <- meta_collapsed[order(meta_collapsed$condition),] 
+
+# Re-ordering cts_collapsed columns
+cts_collapsed <- cts_collapsed[,match(rownames(meta_collapsed), colnames(cts_collapsed))]
+```
+
+# DESeq2 {#deseq}
+
+<https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
+
+Love, M.I., Huber, W., Anders, S. (2014) Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, **15**:550. [10.1186/s13059-014-0550-8](http://dx.doi.org/10.1186/s13059-014-0550-8)
+
+```{r}
+# Verifying colnames and rownames match
+all(colnames(cts) == rownames(meta))
+
+# Running
+dds <- DESeqDataSetFromMatrix(countData = cts, colData = meta, design = ~condition)
+dds <- DESeq(dds)
+res <- results(dds)
+res_df <- as.data.frame(res)
+
+# Getting normalized matrix
+ntd <- normTransform(dds)
+norm_df <- as.data.frame(assay(ntd))
+
+# Genes of interest for Down Syndrome
+#View(res_df[which(rownames(res_df) %in% intGenes),])
+
+```
+
+## Identifying DEGs
+
+```{r}
+# Adding diffexpressed column to results df
+res_df$DEG <- "NO"
+res_df$DEG[res_df$log2FoldChange > 1 & res_df$padj < 0.05] <- "UP"
+res_df$DEG[res_df$log2FoldChange < -1 & res_df$padj < 0.05] <- "DOWN"
+res_df$DEG <- factor(res_df$DEG)
+
+# Top DEGs
+degs_df <- res_df[!grepl("NO", res_df$DEG),]
+degs_df <- degs_df[order(-abs(degs_df$log2FoldChange)),]
+degs <- rownames(degs_df)
+top20 <- rownames(head(degs_df, 20))
+```
+
+## Printing results table
+
+```{r}
+# Genes of interest
+int_df <- res_df[rownames(res_df) %in% intGenes,]
+kable(int_df[order(int_df$padj),], format = "html", caption = "Complement genes of interest") %>%
+  kable_styling()
+#save_kable("complement_table.html", res_table)
+
+# Top 20 DEGs
+kable(degs_df[1:20,], format = "html", caption = "Top 20 DEGs") %>%
+  kable_styling()
+#save_kable("degs.html", res_table)
+```
+
+## Comparing to original paper
+
+```{r}
+summary(degs %in% degs_orig)
+summary(top20 %in% top20_orig)
+
+top20[top20 %in% top20_orig]
+```
+
+## Collapsed
+
+```{r}
+######################
+#   Running DESeq2   #
+######################
+
+# Verifying colnames and rownames match
+all(colnames(cts_collapsed) == rownames(meta_collapsed))
+
+# Running
+dds_collapsed <- DESeqDataSetFromMatrix(countData = cts_collapsed, colData = meta_collapsed, design = ~condition)
+dds_collapsed <- DESeq(dds_collapsed)
+res_collapsed <- results(dds_collapsed)
+res_df_collapsed <- as.data.frame(res_collapsed)
+
+# Getting normalized matrix
+ntd_collapsed <- normTransform(dds_collapsed)
+norm_df_collapsed <- as.data.frame(assay(ntd_collapsed))
+
+######################
+#  Identifying DEGs  #
+######################
+
+# Adding diffexpressed column to results df
+res_df_collapsed$DEG <- "NO"
+res_df_collapsed$DEG[res_df_collapsed$log2FoldChange > 1 & res_df_collapsed$padj < 0.05] <- "UP"
+res_df_collapsed$DEG[res_df_collapsed$log2FoldChange < -1 & res_df_collapsed$padj < 0.05] <- "DOWN"
+res_df_collapsed$DEG <- factor(res_df_collapsed$DEG)
+
+# Top DEGs
+degs_df_collapsed <- res_df_collapsed[!grepl("NO", res_df_collapsed$DEG),]
+degs_df_collapsed <- degs_df_collapsed[order(-abs(degs_df_collapsed$log2FoldChange)),]
+degs_collapsed <- rownames(degs_df_collapsed)
+top20_collapsed <- rownames(head(degs_df_collapsed, 20))
+
+#######################
+# Print results table #
+#######################
+
+# Genes of interest
+int_df_collapsed <- res_df_collapsed[rownames(res_df_collapsed) %in% intGenes,]
+kable(int_df_collapsed[order(int_df_collapsed$padj),], format = "html", caption = "Complement genes of interest") %>%
+  kable_styling()
+#save_kable("complement_table.html", res_table)
+
+# Top 20 DEGs
+kable(degs_df_collapsed[1:20,], format = "html", caption = "Top 20 DEGs") %>%
+  kable_styling()
+#save_kable("degs.html", res_table)
+
+#########################
+# Comparing to original #
+#########################
+
+summary(top20_collapsed %in% top20_orig)
+summary(top20_collapsed %in% top20)
+summary(degs_collapsed %in% degs)
+summary(degs_collapsed %in% degs_orig)
+
+```
+
+## Venn diagrams of DEGs
+
+```{r}
+# List of lists of DEGs
+all_degs <- list(original = degs_orig, replication = degs, collapsed = degs_collapsed)
+
+ggvenn(
+  all_degs, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#CD534CFF"),
+  stroke_size = 0.5, 
+  set_name_size = 4
+  )
+
+intersec_degs <- degs_orig[degs_orig %in% degs_collapsed]
+intersec_degs <- intersec_degs[intersec_degs %in% degs]
+
+intersec_degs
+```
+
+# Exploratory analysis {#exp}
+
+## Dimensionality reduction
+
+### PCA
+
+```{r}
+# Normalized matrix
+vsd <- vst(dds, blind=FALSE)
+
+for (i in colnames(meta)){
+  pca_plot <- plotPCA(vsd, intgroup = i) +
+    labs(title = "PCA plot", subtitle = paste0("Looking at ", i))
+  print(pca_plot)
+}
+```
+
+## Cooks distance
+
+```{r}
+boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
+```
+
+## Molecular degree perturbation
+
+```{r}
+pheno <- data.frame(matrix(nrow = nrow(meta), ncol = 2))
+pheno$Sample <- rownames(meta)
+pheno$Class <- meta$condition
+
+#mdp(data = cts, pdata = pheno, control_lab = "CT", save_tables = FALSE, file_name = "mdp_")
+```
+
+# Basic expression analysis {#basic}
+
+## Box plot
+
+```{r}
+# Long format for genes of interest
+norm_int <- norm_df[rownames(norm_df) %in% intGenes,]
+norm_int["condition",] <- meta$condition
+norm_int <- as.data.frame(t(norm_int))
+long_int <- norm_int %>% pivot_longer(cols = -condition, names_to = "gene", values_to = "expression")
+long_int <- as.data.frame(long_int)
+long_int$expression <- as.numeric(long_int$expression)
+
+# Long format for DEGs
+norm_degs <- norm_df[rownames(norm_df) %in% top20,]
+norm_degs["condition",] <- meta$condition
+norm_degs <- as.data.frame(t(norm_degs))
+long_degs <- norm_degs %>% pivot_longer(cols = -condition, names_to = "gene", values_to = "expression")
+long_degs <- as.data.frame(long_degs)
+long_degs$expression <- as.numeric(long_degs$expression)
+```
+
+Genes of interest
+
+```{r}
+ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
+  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+  geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
+  labs(
+    title = "Boxplot",
+    subtitle = "Genes of interest"
+  )+ 
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid = element_line(color = "gray", linetype = "dotted")
+  )
+
+```
+
+DEGs
+
+```{r}
+ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
+  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+  geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
+  labs(
+    title = "Boxplot",
+    subtitle = "Top 20 DEGs"
+  )+ 
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid = element_line(color = "gray", linetype = "dotted")
+  )
+```
+
+## Genes of interest Heatmaps
+
+Normalized expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% intGenes,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Normalized expression levels by sample (Complement genes)",
+  cluster_rows = TRUE, 
+  show_rownames = TRUE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  color = hcl.colors(50, "BluYl")
+)
+```
+
+Z-score expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% intGenes,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Z-score of expression levels by sample (Complement genes)",
+  cluster_rows = TRUE, 
+  show_rownames = TRUE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  scale = "row" # Z-score
+)
+
+```
+
+## DEGs Heatmaps
+
+Normalized expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% top20,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Normalized expression levels by sample (Top 20 DEGs)",
+  cluster_rows = TRUE, 
+  show_rownames = TRUE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor","condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12, 
+  color = hcl.colors(50, "BluYl")
+)
+```
+
+Z-score expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% top20,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Z-score of expression levels by sample (Top 20 DEGs)",
+  cluster_rows = TRUE, 
+  show_rownames = TRUE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  scale = "row" # Z-score
+)
+```
+
+# Differential expression analysis {#dea}
+
+## MA plot
+
+```{r}
+plotMA(res, ylim=c(-7,7))
+```
+
+## Volcano plot
+
+### Genes of interest
+
+```{r}
+
+# Genes to highlight
+res_df$highlight <- rownames(res_df)
+res_df$highlight[!(res_df$highlight %in% intGenes)] <- NA
+
+# Plotting
+volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
+  # Log2FC threshold
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = 'dashed') +
+  # padj threshold
+  geom_hline(yintercept = -log10(0.05), col = "black", linetype = 'dashed') +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"),labels = c("Downregulated", "Not significant", "Upregulated")) + 
+  coord_cartesian(ylim = c(0, 10), xlim = c(-7, 7)) + # how much zoom
+  labs(
+    color = "Differential\nexpression",
+    x = expression("log"[2]*"FC"), 
+    y = expression("-log"[10]*"padj"),
+    title = "Differentially expressed genes",
+    subtitle = "Comparing DS against CT (|log2fc| > 1, padj < 0.05)"
+    ) +
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
+  geom_text_repel(max.overlaps = Inf, color = "black") # To show all labels 
+
+print(volcano)
+#ggsave("volcano.png", plot = volcano, height = 10, width = 15)
+```
+
+### DEGs
+
+```{r}
+# Genes to highlight
+res_df$highlight <- rownames(res_df)
+res_df$highlight[!(res_df$highlight %in% top20)] <- NA
+
+# Plotting
+volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
+  # Log2FC threshold
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = 'dashed') +
+  # padj threshold
+  geom_hline(yintercept = -log10(0.05), col = "black", linetype = 'dashed') +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"),labels = c("Downregulated", "Not significant", "Upregulated")) + 
+  coord_cartesian(ylim = c(0, 10), xlim = c(-7, 7)) + # how much zoom
+  labs(
+    color = "Differential\nexpression",
+    x = expression("log"[2]*"FC"), 
+    y = expression("-log"[10]*"padj"),
+    title = "Differentially expressed genes",
+    subtitle = "Comparing DS against CT (|log2fc| > 1, padj < 0.05)"
+    ) +
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
+  geom_text_repel(max.overlaps = Inf, color = "black") # To show all labels 
+
+print(volcano)
+#ggsave("volcano.png", plot = volcano, height = 10, width = 15)
+```
+
+# Functional analysis {#gsea}
+
+## Over representation analysis
+
+```{r}
+ego <- enrichGO(
+  gene = ,
+  universe = ,
+  OrgDb = ,
+  ont = ,
+  pAdjustMethod = ,
+  pvalueCutoff = ,
+  qvalueCutoff = ,
+  readable = 
+)
+
+ekg <- enrichKEGG(
+  
+)
+```
+
+## Gene set enrichment analysis
+
+```{r}
+ggo <- gseGO(
+  
+)
+
+gkg <- gseKEGG(
+  
+)
+```
+
+## Signaling pathways
+
+```{r}
+
+```
