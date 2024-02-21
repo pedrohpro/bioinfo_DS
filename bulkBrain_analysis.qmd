@@ -14,6 +14,14 @@ Oriented by: Andréa Laurato Sertié
 
 Co-oriented by: André Luiz Teles e Silva, Helder Takashi Imoto Nakaya, Jonathan Peña Avila
 
+<https://www.nature.com/articles/nature10523#accession-codes>
+
+<https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs000755.v2.p1>
+
+<http://development.psychencode.org/#>
+
+Por que no site oficial eles tiraram os metadados de pH, PMI, RIN? Efeito de lote conhecido comprometedor?
+
 ### Cleaning environment {style="background-color: #DDDDDD; color: #000000; padding-top: 15px;   padding-right: 15px;   padding-bottom: 15px;   padding-left: 15px"}
 
 ```{r}
