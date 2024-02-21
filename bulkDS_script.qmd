@@ -190,14 +190,13 @@ This is a project by: **Pedro Henrique Prado de Oliveira**
 rm(list = ls())     # clears Environment 
 ```
 
-## Library importation
+# Library importation
 
 ```{r}
 library(tidyverse)
 library(DESeq2)  
 library(ComplexHeatmap)
 library(data.table)
-library(AnnotationDbi)
 library(org.Hs.eg.db)
 library(biomaRt)
 library(RColorBrewer)
@@ -206,18 +205,19 @@ library(umap)
 library(pheatmap)
 library(mdp)
 library(kableExtra)
-library(fgsea)
 library(readxl)
 library(ggvenn)
 library(clusterProfiler)
+library(pathview)
+library(cowplot)
+library(GOplot)
+library(enrichplot)
+library(pathview)
+library(gage)
+library(gageData)
+library(sva) #combatseq
+library(webshot2)
 
-install.packages("conflicted")
-library(conflicted)
-conflict_prefer("filter", "dplyr")
-conflict_prefer("lag", "dplyr")
-conflict_prefer("select", "dplyr")
-
-install.packages(c("biomaRt", "dbplyr"))
 ```
 
 # Data wrangling {#dw}
@@ -245,26 +245,15 @@ cts <- mutate_all(cts, as.numeric)
 
 # Adding gene name next to ENSEMBL id with biomaRt
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-ensembl_ids <- c("ENSG00000279928")#rownames(cts)
-gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
-                   filters = "ensembl_gene_id",
-                   values = ensembl_ids,
-                   mart = ensembl)
-
-rownames(cts) <- paste0(rownames(cts), "|", getBM(
+all_features <- getBM(
   attributes = c("ensembl_gene_id", "external_gene_name"),
   filters = "ensembl_gene_id",
   values = rownames(cts),
-  mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-))
-
-# Adding gene name next to ENSEMBL id with annoationDbi
-rownames(cts) <- paste0(rownames(cts), "|", mapIds(
-  org.Hs.eg.db, 
-  keys = rownames(cts),
-  keytype = "ENSEMBL",
-  column = "SYMBOL"
-  ))
+  mart = ensembl
+)
+all_features <- all_features[match(rownames(cts), all_features$ensembl_gene_id),] #matching order
+all_features$external_gene_name[all_features$external_gene_name == ""] <- "NA"
+rownames(cts) <- paste0(all_features$ensembl_gene_id, "|", all_features$external_gene_name)
 
 # Remove all features named as NA
 cts <- cts[substring(rownames(cts), 17) != "NA",]
@@ -274,6 +263,9 @@ cts <- as.matrix(cts) # to be able to have duplicated rownames
 rownames(cts) <- substring(rownames(cts), 17)
 cts <- rowsum(cts, rownames(cts))
 cts <- as.data.frame(cts)
+
+# Registering sample genes for downstream functional analysis
+sample_genes <- rownames(cts)
 
 ```
 
@@ -331,34 +323,19 @@ top20_orig <- orig_degs_df$gene[1:20]
 # Basic gene filtering: more than __ reads for a gene for all samples
 cts <- cts[rowSums(cts) > 10,]
 
-# Filtering in results DESeq2: independent filtering
-```
-
-## Collapsing replicates
-
-```{r}
-# Meta collapsed
-meta_collapsed <- meta[,c("Age","BIOMATERIAL_PROVIDER","condition","donor")]
-meta_collapsed <- meta_collapsed[!duplicated(meta$donor),]
-rownames(meta_collapsed) <- meta_collapsed$donor
-meta_collapsed <- subset(meta_collapsed, select = -donor)
-
-# cts collapsed (improve)
-cts_collapsed <- data.frame(matrix(nrow = nrow(cts), ncol = nlevels(meta$donor)))
-colnames(cts_collapsed) <- levels(meta$donor)
-rownames(cts_collapsed) <- rownames(cts)
-for (i in levels(meta$donor)) {
-  cts_collapsed[,i] <- rowSums(cts[, meta$donor == i])
+# Gene must be expressed in at least 70% of samples
+filter <- list()
+for (i in 1:nrow(cts)) {
+  if((sum(cts[i,] > 0)/ncol(cts)) > 0.7){
+    filter <- append(filter, i)
+  } 
 }
-
-# Re-ordering meta_collapsed rows
-meta_collapsed <- meta_collapsed[order(meta_collapsed$condition),] 
-
-# Re-ordering cts_collapsed columns
-cts_collapsed <- cts_collapsed[,match(rownames(meta_collapsed), colnames(cts_collapsed))]
+cts <- cts[as.numeric(filter),]
 ```
 
 # DESeq2 {#deseq}
+
+Ideally the differential expression analysis would be placed after the exploratory analysis and and basic expression analysis, however, because DESeq2 performs normalization and DE altogether, then for the sake of organization it will be placed before exploratory analysis in this case.
 
 <https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
 
@@ -394,114 +371,9 @@ res_df$DEG <- factor(res_df$DEG)
 
 # Top DEGs
 degs_df <- res_df[!grepl("NO", res_df$DEG),]
-degs_df <- degs_df[order(-abs(degs_df$log2FoldChange)),]
+degs_df <- degs_df[order(-abs(degs_df$log2FoldChange)),] #absolute value
 degs <- rownames(degs_df)
 top20 <- rownames(head(degs_df, 20))
-```
-
-## Printing results table
-
-```{r}
-# Genes of interest
-int_df <- res_df[rownames(res_df) %in% intGenes,]
-kable(int_df[order(int_df$padj),], format = "html", caption = "Complement genes of interest") %>%
-  kable_styling()
-#save_kable("complement_table.html", res_table)
-
-# Top 20 DEGs
-kable(degs_df[1:20,], format = "html", caption = "Top 20 DEGs") %>%
-  kable_styling()
-#save_kable("degs.html", res_table)
-```
-
-## Comparing to original paper
-
-```{r}
-summary(degs %in% degs_orig)
-summary(top20 %in% top20_orig)
-
-top20[top20 %in% top20_orig]
-```
-
-## Collapsed
-
-```{r}
-######################
-#   Running DESeq2   #
-######################
-
-# Verifying colnames and rownames match
-all(colnames(cts_collapsed) == rownames(meta_collapsed))
-
-# Running
-dds_collapsed <- DESeqDataSetFromMatrix(countData = cts_collapsed, colData = meta_collapsed, design = ~condition)
-dds_collapsed <- DESeq(dds_collapsed)
-res_collapsed <- results(dds_collapsed)
-res_df_collapsed <- as.data.frame(res_collapsed)
-
-# Getting normalized matrix
-ntd_collapsed <- normTransform(dds_collapsed)
-norm_df_collapsed <- as.data.frame(assay(ntd_collapsed))
-
-######################
-#  Identifying DEGs  #
-######################
-
-# Adding diffexpressed column to results df
-res_df_collapsed$DEG <- "NO"
-res_df_collapsed$DEG[res_df_collapsed$log2FoldChange > 1 & res_df_collapsed$padj < 0.05] <- "UP"
-res_df_collapsed$DEG[res_df_collapsed$log2FoldChange < -1 & res_df_collapsed$padj < 0.05] <- "DOWN"
-res_df_collapsed$DEG <- factor(res_df_collapsed$DEG)
-
-# Top DEGs
-degs_df_collapsed <- res_df_collapsed[!grepl("NO", res_df_collapsed$DEG),]
-degs_df_collapsed <- degs_df_collapsed[order(-abs(degs_df_collapsed$log2FoldChange)),]
-degs_collapsed <- rownames(degs_df_collapsed)
-top20_collapsed <- rownames(head(degs_df_collapsed, 20))
-
-#######################
-# Print results table #
-#######################
-
-# Genes of interest
-int_df_collapsed <- res_df_collapsed[rownames(res_df_collapsed) %in% intGenes,]
-kable(int_df_collapsed[order(int_df_collapsed$padj),], format = "html", caption = "Complement genes of interest") %>%
-  kable_styling()
-#save_kable("complement_table.html", res_table)
-
-# Top 20 DEGs
-kable(degs_df_collapsed[1:20,], format = "html", caption = "Top 20 DEGs") %>%
-  kable_styling()
-#save_kable("degs.html", res_table)
-
-#########################
-# Comparing to original #
-#########################
-
-summary(top20_collapsed %in% top20_orig)
-summary(top20_collapsed %in% top20)
-summary(degs_collapsed %in% degs)
-summary(degs_collapsed %in% degs_orig)
-
-```
-
-## Venn diagrams of DEGs
-
-```{r}
-# List of lists of DEGs
-all_degs <- list(original = degs_orig, replication = degs, collapsed = degs_collapsed)
-
-ggvenn(
-  all_degs, 
-  fill_color = c("#0073C2FF", "#EFC000FF", "#CD534CFF"),
-  stroke_size = 0.5, 
-  set_name_size = 4
-  )
-
-intersec_degs <- degs_orig[degs_orig %in% degs_collapsed]
-intersec_degs <- intersec_degs[intersec_degs %in% degs]
-
-intersec_degs
 ```
 
 # Exploratory analysis {#exp}
@@ -530,9 +402,9 @@ boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
 ## Molecular degree perturbation
 
 ```{r}
-pheno <- data.frame(matrix(nrow = nrow(meta), ncol = 2))
-pheno$Sample <- rownames(meta)
-pheno$Class <- meta$condition
+# pheno <- data.frame(matrix(nrow = nrow(meta), ncol = 2))
+# pheno$Sample <- rownames(meta)
+# pheno$Class <- meta$condition
 
 #mdp(data = cts, pdata = pheno, control_lab = "CT", save_tables = FALSE, file_name = "mdp_")
 ```
@@ -541,9 +413,13 @@ pheno$Class <- meta$condition
 
 ## Box plot
 
+!!!!!!!!!!! Incluir asterisco de signifcativo pra cada par padj \< 0.05
+
 ```{r}
 # Long format for genes of interest
 norm_int <- norm_df[rownames(norm_df) %in% intGenes,]
+local_res <- 
+rownames(norm_int)[] <- paste0(rownames(norm_int)[], " *") # adding sig asterisk
 norm_int["condition",] <- meta$condition
 norm_int <- as.data.frame(t(norm_int))
 long_int <- norm_int %>% pivot_longer(cols = -condition, names_to = "gene", values_to = "expression")
@@ -559,7 +435,7 @@ long_degs <- as.data.frame(long_degs)
 long_degs$expression <- as.numeric(long_degs$expression)
 ```
 
-Genes of interest
+Genes of interest - all together
 
 ```{r}
 ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
@@ -576,7 +452,29 @@ ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
 
 ```
 
-DEGs
+Genes of interest - separated
+
+```{r}
+# mudar background do título de cinza pra outra cor
+# colocar asterisco de significância
+ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
+  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+
+  geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
+  facet_wrap(~gene, scales = "free")+ # separated box plots
+  labs(
+    title = "Boxplot",
+    subtitle = "Genes of interest",
+    x = "",
+    y = "DESeq2 normalized expression"
+  )+ 
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid = element_line(color = "gray", linetype = "dotted"),
+    strip.background = element_rect(fill="#D1FFBD"),
+  )
+```
+
+DEGs - all together
 
 ```{r}
 ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
@@ -592,7 +490,89 @@ ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
   )
 ```
 
-## Genes of interest Heatmaps
+DEGs - separated
+
+```{r}
+ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
+  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+
+  geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
+  facet_wrap(~gene, scales = "free")+
+  labs(
+    title = "Boxplot",
+    subtitle = "Top 20 DEGs"
+  )+ 
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid = element_line(color = "gray", linetype = "dotted")
+  )
+```
+
+## Heatmaps
+
+All genes
+
+Normalized expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Normalized expression levels by sample (All genes)",
+  cluster_rows = TRUE, 
+  show_rownames = FALSE, 
+  cluster_cols = FALSE,
+  show_colnames = FALSE,
+  treeheight_row = 0,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  color = hcl.colors(50, "BluYl")
+)
+```
+
+Z-score
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Z-score of expression levels by sample (All genes)",
+  cluster_rows = TRUE, 
+  show_rownames = FALSE, 
+  cluster_cols = FALSE,
+  show_colnames = FALSE,
+  treeheight_row = 0,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  scale = "row" # Z-score
+)
+```
+
+Genes of interest
 
 Normalized expression
 
@@ -607,7 +587,7 @@ norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 # Plotting heatmap
 pheatmap(
   norm_sub,
-  main = "Normalized expression levels by sample (Complement genes)",
+  main = "Normalized expression levels by sample (Genes of interest)",
   cluster_rows = TRUE, 
   show_rownames = TRUE, 
   cluster_cols = FALSE,
@@ -633,10 +613,17 @@ norm_sub <- assay(ntd)[rownames(ntd) %in% intGenes,]
 local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
+# Getting DE padj values
+rowannot <- res_df[rownames(res_df) %in% intGenes,c("log2FoldChange","padj")]
+rowannot$significance <- "notSig"
+rowannot$significance[rowannot$padj < 0.05] <- "sig"
+rowannot <- rowannot[match(rownames(norm_sub), rownames(rowannot)),]
+rowannot$significance <- as.factor(rowannot$significance)
+
 # Plotting heatmap
 pheatmap(
   norm_sub,
-  main = "Z-score of expression levels by sample (Complement genes)",
+  main = "Z-score of normalized expression levels by sample (Genes of interest)",
   cluster_rows = TRUE, 
   show_rownames = TRUE, 
   cluster_cols = FALSE,
@@ -645,15 +632,18 @@ pheatmap(
   angle_col = 45,
   fontsize_col = 9,
   annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_row = rowannot[,c("log2FoldChange","significance")],
   annotation_names_col = FALSE,
+  annotation_names_row = FALSE,
   na_col = "#555555",
   gaps_col = 12,
-  scale = "row" # Z-score
+  scale = "row", # Z-score
+  annotation_colors = list(log2FoldChange = c('blue', 'white', 'red'), significance = c(sig = 'lightgreen', notSig = 'white')) # set log2fc 0 to white
 )
 
 ```
 
-## DEGs Heatmaps
+Top 20 DEGs
 
 Normalized expression
 
@@ -713,7 +703,85 @@ pheatmap(
 )
 ```
 
+All DEGs
+
+Normalized expression
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% degs,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Normalized expression levels by sample (All DEGs)",
+  cluster_rows = TRUE, 
+  show_rownames = FALSE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  treeheight_row = 0,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor","condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12, 
+  color = hcl.colors(50, "BluYl")
+)
+```
+
+Z-score
+
+```{r}
+# Selecting only desired genes
+norm_sub <- assay(ntd)[rownames(ntd) %in% degs,]
+
+# Relocating expression columns and metadata rows to group same condition samples 
+local_meta <- arrange(meta, condition, donor, differentiation_protocol)
+norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
+
+# Plotting heatmap
+pheatmap(
+  norm_sub,
+  main = "Z-score of expression levels by sample (All DEGs)",
+  cluster_rows = TRUE, 
+  show_rownames = FALSE, 
+  cluster_cols = FALSE,
+  show_colnames = TRUE,
+  treeheight_row = 0,
+  #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
+  angle_col = 45,
+  fontsize_col = 9,
+  annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
+  annotation_names_col = FALSE,
+  na_col = "#555555",
+  gaps_col = 12,
+  scale = "row" # Z-score
+)
+```
+
 # Differential expression analysis {#dea}
+
+## Printing results table
+
+```{r}
+# Genes of interest
+int_df <- res_df[rownames(res_df) %in% intGenes,]
+
+kable(int_df[order(int_df$padj),], format = "html", caption = "Genes of interest") %>%
+  kable_styling()
+#save_kable(file = "complement_table.png", table)
+
+# Top 20 DEGs
+kable(degs_df[1:20,], format = "html", caption = "Top 20 DEGs") %>%
+  kable_styling()
+#save_kable("degs.html", res_table)
+```
 
 ## MA plot
 
@@ -723,7 +791,7 @@ plotMA(res, ylim=c(-7,7))
 
 ## Volcano plot
 
-### Genes of interest
+Genes of interest
 
 ```{r}
 
@@ -754,7 +822,7 @@ print(volcano)
 #ggsave("volcano.png", plot = volcano, height = 10, width = 15)
 ```
 
-### DEGs
+DEGs
 
 ```{r}
 # Genes to highlight
@@ -784,40 +852,269 @@ print(volcano)
 #ggsave("volcano.png", plot = volcano, height = 10, width = 15)
 ```
 
+## Karyoplot
+
+<https://bernatgel.github.io/karyoploter_tutorial//Examples/MultipleDataTypes/MultipleDataTypes.html>
+
+```{r}
+
+```
+
+# Alternative analysis
+
+## Collapsing replicates
+
+```{r}
+# Meta collapsed
+meta_collapsed <- meta[,c("Age","BIOMATERIAL_PROVIDER","condition","donor")]
+meta_collapsed <- meta_collapsed[!duplicated(meta$donor),]
+rownames(meta_collapsed) <- meta_collapsed$donor
+meta_collapsed <- subset(meta_collapsed, select = -donor)
+
+# cts collapsed (improve)
+cts_collapsed <- data.frame(matrix(nrow = nrow(cts), ncol = nlevels(meta$donor)))
+colnames(cts_collapsed) <- levels(meta$donor)
+rownames(cts_collapsed) <- rownames(cts)
+for (i in levels(meta$donor)) {
+  cts_collapsed[,i] <- rowSums(cts[, meta$donor == i])
+}
+
+# Re-ordering meta_collapsed rows
+meta_collapsed <- meta_collapsed[order(meta_collapsed$condition),] 
+
+# Re-ordering cts_collapsed columns
+cts_collapsed <- cts_collapsed[,match(rownames(meta_collapsed), colnames(cts_collapsed))]
+
+######################
+#   Running DESeq2   #
+######################
+
+# Verifying colnames and rownames match
+all(colnames(cts_collapsed) == rownames(meta_collapsed))
+
+# Running
+dds_collapsed <- DESeqDataSetFromMatrix(countData = cts_collapsed, colData = meta_collapsed, design = ~condition)
+dds_collapsed <- DESeq(dds_collapsed)
+res_collapsed <- results(dds_collapsed)
+res_df_collapsed <- as.data.frame(res_collapsed)
+
+# Getting normalized matrix
+ntd_collapsed <- normTransform(dds_collapsed)
+norm_df_collapsed <- as.data.frame(assay(ntd_collapsed))
+
+######################
+#  Identifying DEGs  #
+######################
+
+# Adding diffexpressed column to results df
+res_df_collapsed$DEG <- "NO"
+res_df_collapsed$DEG[res_df_collapsed$log2FoldChange > 1 & res_df_collapsed$padj < 0.05] <- "UP"
+res_df_collapsed$DEG[res_df_collapsed$log2FoldChange < -1 & res_df_collapsed$padj < 0.05] <- "DOWN"
+res_df_collapsed$DEG <- factor(res_df_collapsed$DEG)
+
+# Top DEGs
+degs_df_collapsed <- res_df_collapsed[!grepl("NO", res_df_collapsed$DEG),]
+degs_df_collapsed <- degs_df_collapsed[order(-abs(degs_df_collapsed$log2FoldChange)),]
+degs_collapsed <- rownames(degs_df_collapsed)
+top20_collapsed <- rownames(head(degs_df_collapsed, 20))
+
+#######################
+# Print results table #
+#######################
+
+# Genes of interest
+int_df_collapsed <- res_df_collapsed[rownames(res_df_collapsed) %in% intGenes,]
+kable(int_df_collapsed[order(int_df_collapsed$padj),], format = "html", caption = "Complement genes of interest") %>%
+  kable_styling()
+#save_kable("complement_table.html", res_table)
+
+# Top 20 DEGs
+kable(degs_df_collapsed[1:20,], format = "html", caption = "Top 20 DEGs") %>%
+  kable_styling()
+#save_kable("degs.html", res_table)
+```
+
+## Removing ATCC samples
+
+```{r}
+
+```
+
+## Correcting batch effect
+
+```{r}
+ctsAdjCT <- ComBat_seq(
+  as.matrix(cts[,meta$condition == "CT"]), 
+  batch = meta[meta$condition == "DS",]$donor 
+  )
+
+ctsAdjDS <- ComBat_seq(
+  as.matrix(cts[,meta$condition == "DS"]), 
+  batch = meta[meta$condition == "DS",]$donor 
+  )
+
+ctsAdj <- cbind(ctsAdjCT, ctsAdjDS)
+ctsAdj <- ctsAdj[,match(colnames(cts), colnames(ctsAdj))]
+```
+
+# Comparing results
+
+## Venn Diagram of DEGs
+
+```{r}
+# List of lists of DEGs
+all_degs <- list(original = degs_orig, replication = degs, collapsed = degs_collapsed)
+
+ggvenn(
+  all_degs, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#CD534CFF"),
+  stroke_size = 0.5, 
+  set_name_size = 4
+  )
+
+intersec_degs <- degs_orig[degs_orig %in% degs_collapsed]
+intersec_degs <- intersec_degs[intersec_degs %in% degs]
+
+intersec_degs
+```
+
 # Functional analysis {#gsea}
+
+GO:0016322 -\> neuron remodelling / synaptic pruning
+
+<https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html>
 
 ## Over representation analysis
 
 ```{r}
-ego <- enrichGO(
-  gene = ,
-  universe = ,
-  OrgDb = ,
-  ont = ,
-  pAdjustMethod = ,
-  pvalueCutoff = ,
-  qvalueCutoff = ,
-  readable = 
-)
+# Finding GO enriched sets
+ego <- list()
+for (i in c("all", "BP", "CC", "MF")) {
+  ego[[i]] <- enrichGO(
+    keyType = "SYMBOL",
+    gene = degs,
+    universe = sample_genes, # sample genes. IMPORTANT!!!
+    OrgDb = org.Hs.eg.db,
+    ont = i,
+    #pAdjustMethod = "bonferroni",
+    pvalueCutoff = 0.05,
+    qvalueCutoff = 0.05,
+    readable = TRUE
+  )
+}
 
-ekg <- enrichKEGG(
-  
-)
+# Barplots 
+BPbar <- barplot(ego$BP, showCategory = 5) + 
+  labs(title = "Biological Process") +
+  scale_fill_gradient(low = "#36013f", high = "lightblue")
+CCbar <- barplot(ego$CC, showCategory = 5) + 
+  labs(title = "Cellular Component") +
+  scale_fill_gradient(low = "darkred", high = "pink")
+MFbar <- barplot(ego$MF, showCategory = 5) + 
+  labs(title = "Molecular Function") +
+  scale_fill_gradient(low = "darkgreen", high = "lightgreen")
+
+# Ordering DEGs for over representation analysis
+geneList <- degs_df$log2FoldChange
+names(geneList) <- rownames(degs_df)
+
+# Network plots
+BPnet <- cnetplot(ego$BP, foldChange = geneList) + 
+  labs(title = "Biological Process") +
+  theme(plot.title = element_text(hjust = 0.5))
+CCnet <- cnetplot(ego$CC, foldChange = degs_df$log2FoldChange) + 
+  labs(title = "Cellular Component") +
+  theme(plot.title = element_text(hjust = 0.5))
+MFnet <- cnetplot(ego$MF, foldChange = degs_df$log2FoldChange) + 
+  labs(title = "Molecular Function") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Circle plots (careful with order)
+BPcirc <- cnetplot(ego$BP, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "Biological Process") +
+  theme(plot.title = element_text(hjust = 0.5))
+CCcirc <- cnetplot(ego$CC, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "Cellular Component") +
+  theme(plot.title = element_text(hjust = 0.5))
+MFcirc <- cnetplot(ego$MF, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "Molecular Function") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# EMA plots
+# egoBP_pt <- pairwise_termsim(ego$BP)
+# egoCC_pt <- pairwise_termsim(ego$CC)
+# egoMF_pt <- pairwise_termsim(ego$MF)
+# BPema <- emapplot(egoBP_pt)
+# CCema <- emapplot(egoCC_pt)
+# MFema <- emapplot(egoMF_pt)
+
+# Grouping plots
+overRepGO <- plot_grid(
+  BPbar, CCbar, MFbar, BPnet, CCnet, MFnet, BPcirc, CCcirc, MFcirc, 
+  labels = "AUTO", label_size = 40) +   
+  theme(plot.background = element_rect(fill = "white"))
+ggsave("overRepGO.png", plot = overRepGO, height = 35, width = 30)
+
 ```
 
 ## Gene set enrichment analysis
 
 ```{r}
-ggo <- gseGO(
-  
-)
+# Ordering DEGs for GSEA
+aux_df <- degs_df[order(-degs_df$log2FoldChange),]
+geneList <- aux_df$log2FoldChange
+names(geneList) <- rownames(aux_df)
 
-gkg <- gseKEGG(
-  
-)
+# Running
+ggo <- list()
+for (i in c("BP", "CC", "MF")) {
+  ggo[[i]] <- gseGO(
+    geneList,
+    keyType = "SYMBOL",
+    OrgDb = org.Hs.eg.db,
+    eps = 1e-300, # more precise p-values
+    ont = i
+    #minGSSize = 100,
+    #maxGSSize = 500,
+    #pvalueCutoff = 0.05,
+    #verbose = FALSE
+  )
+}
+
+
+###################################### ARRUMAR!!!!
+
+# p1 <- gseaplot2(ggo$BP, geneSetID = 1, title = ggo$BP@result$Description[1])
+# p2 <- gseaplot2(ggo$BP, geneSetID = 2, title = ggo$BP@result$Description[2])
+# p3 <- gseaplot2(ggo$BP, geneSetID = 3, title = ggo$BP@result$Description[3])
+# p4 <- gseaplot2(ggo$BP, geneSetID = 4, title = ggo$BP@result$Description[4])
+# p5 <- gseaplot2(ggo$BP, geneSetID = 5, title = ggo$BP@result$Description[5])
+# p6 <- gseaplot2(ggo$BP, geneSetID = 6, title = ggo$BP@result$Description[6])
+# 
+# 
+# 
+# gsea_combined <- plot_grid(plotlist = p1, labels = "AUTO")
+# ggsave("gsea.png", plot = gsea_combined, height = 30, width = 30)
+# 
+# gseaplot2(ggo$BP, geneSetID = 1:5)
+
+#gseaplot2(ggo$BP, geneSetID = 1:3, pvalue_table = TRUE, color = c("#E495A5", "#86B875", "#7DB0DD"))
+
 ```
 
 ## Signaling pathways
+
+```{r}
+
+hsa04110 <- pathview(gene.data  = geneList,
+                     pathway.id = "hsa04110",
+                     species    = "hsa",
+                     limit      = list(gene=max(abs(geneList)), cpd=1))
+```
+
+# Image for the paper
+
+INKscape para montar imagens pro paper.
 
 ```{r}
 
