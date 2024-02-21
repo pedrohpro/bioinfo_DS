@@ -413,13 +413,12 @@ boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
 
 ## Box plot
 
-!!!!!!!!!!! Incluir asterisco de signifcativo pra cada par padj \< 0.05
-
 ```{r}
 # Long format for genes of interest
 norm_int <- norm_df[rownames(norm_df) %in% intGenes,]
-local_res <- 
-rownames(norm_int)[] <- paste0(rownames(norm_int)[], " *") # adding sig asterisk
+local_int_res <- res_df[rownames(res_df) %in% intGenes,]
+local_int_res <- local_int_res[match(rownames(norm_int), rownames(local_int_res)),]
+rownames(norm_int)[local_int_res$padj < 0.05] <- paste0(rownames(norm_int)[local_int_res$padj < 0.05], " *") # adding sig asterisk
 norm_int["condition",] <- meta$condition
 norm_int <- as.data.frame(t(norm_int))
 long_int <- norm_int %>% pivot_longer(cols = -condition, names_to = "gene", values_to = "expression")
@@ -455,22 +454,23 @@ ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
 Genes of interest - separated
 
 ```{r}
-# mudar background do título de cinza pra outra cor
-# colocar asterisco de significância
+# include log2FC and padj values for each?
 ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
-  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+
+  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+ #jitters scatters randomly everytime
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   facet_wrap(~gene, scales = "free")+ # separated box plots
   labs(
-    title = "Boxplot",
-    subtitle = "Genes of interest",
-    x = "",
+    title = "Genes of interest",
+    #subtitle = "",
+    caption = "* significant (DE padj < 0.05)",
+    x = NULL,
     y = "DESeq2 normalized expression"
   )+ 
   theme(
     panel.background = element_rect(fill = "white"),
     panel.grid = element_line(color = "gray", linetype = "dotted"),
     strip.background = element_rect(fill="#D1FFBD"),
+    axis.text.x = element_blank() #removes bottom gene name
   )
 ```
 
@@ -985,6 +985,8 @@ GO:0016322 -\> neuron remodelling / synaptic pruning
 <https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html>
 
 ## Over representation analysis
+
+GO, KEGG and REACTOME.
 
 ```{r}
 # Finding GO enriched sets
