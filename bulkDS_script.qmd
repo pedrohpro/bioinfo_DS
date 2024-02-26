@@ -599,7 +599,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+allgenes_exp <- pheatmap(
   norm_sub,
   main = "Normalized expression levels by sample (All genes)",
   cluster_rows = TRUE, 
@@ -616,6 +616,8 @@ pheatmap(
   gaps_col = 12,
   color = hcl.colors(50, "BluYl")
 )
+print(allgenes_exp)
+ggsave("results/allgenes_exp.png", plot = allgenes_exp, height = 5, width = 8)
 ```
 
 Z-score
@@ -629,7 +631,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+allgenes_zscore <- pheatmap(
   norm_sub,
   main = "Z-score of expression levels by sample (All genes)",
   cluster_rows = TRUE, 
@@ -646,6 +648,8 @@ pheatmap(
   gaps_col = 12,
   scale = "row" # Z-score
 )
+print(allgenes_zscore)
+ggsave("results/allgenes_zscore.png", plot = allgenes_zscore, height = 5, width = 8)
 ```
 
 Genes of interest
@@ -661,7 +665,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+intgenes_exp <- pheatmap(
   norm_sub,
   main = "Normalized expression levels by sample (Genes of interest)",
   cluster_rows = TRUE, 
@@ -677,6 +681,8 @@ pheatmap(
   gaps_col = 12,
   color = hcl.colors(50, "BluYl")
 )
+print(intgenes_exp)
+ggsave("results/intgenes_exp.png", plot = intgenes_exp, height = 8, width = 8)
 ```
 
 Z-score expression
@@ -697,7 +703,7 @@ rowannot <- rowannot[match(rownames(norm_sub), rownames(rowannot)),]
 rowannot$significance <- as.factor(rowannot$significance)
 
 # Plotting heatmap
-pheatmap(
+intgenes_zscore <- pheatmap(
   norm_sub,
   main = "Z-score of normalized expression levels by sample (Genes of interest)",
   cluster_rows = TRUE, 
@@ -720,7 +726,8 @@ pheatmap(
     significance = c(sig = 'lightgreen', notSig = 'white')
   )
 )
-
+print(intgenes_zscore)
+ggsave("results/intgenes_zscore.png", plot = intgenes_zscore, height = 8, width = 8)
 ```
 
 Top 20 DEGs
@@ -736,7 +743,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+top20_exp <- pheatmap(
   norm_sub,
   main = "Normalized expression levels by sample (Top 20 DEGs)",
   cluster_rows = TRUE, 
@@ -752,6 +759,8 @@ pheatmap(
   gaps_col = 12, 
   color = hcl.colors(50, "BluYl")
 )
+print(top20_exp)
+ggsave("results/top20_exp.png", plot = top20_exp, height = 8, width = 8)
 ```
 
 Z-score expression
@@ -765,7 +774,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+top20_zscore <- pheatmap(
   norm_sub,
   main = "Z-score of expression levels by sample (Top 20 DEGs)",
   cluster_rows = TRUE, 
@@ -781,6 +790,8 @@ pheatmap(
   gaps_col = 12,
   scale = "row" # Z-score
 )
+print(top20_zscore)
+ggsave("results/top20_zscore.png", plot = top20_zscore, height = 8, width = 8)
 ```
 
 All DEGs
@@ -796,7 +807,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+alldegs_exp <- pheatmap(
   norm_sub,
   main = "Normalized expression levels by sample (All DEGs)",
   cluster_rows = TRUE, 
@@ -813,6 +824,8 @@ pheatmap(
   gaps_col = 12, 
   color = hcl.colors(50, "BluYl")
 )
+print(alldegs_exp)
+ggsave("results/alldegs_exp.png", plot = alldegs_exp, height = 8, width = 8)
 ```
 
 Z-score
@@ -826,7 +839,7 @@ local_meta <- arrange(meta, condition, donor, differentiation_protocol)
 norm_sub <- norm_sub[,match(rownames(local_meta), colnames(norm_sub))]
 
 # Plotting heatmap
-pheatmap(
+alldegs_zscore <- pheatmap(
   norm_sub,
   main = "Z-score of expression levels by sample (All DEGs)",
   cluster_rows = TRUE, 
@@ -843,6 +856,8 @@ pheatmap(
   gaps_col = 12,
   scale = "row" # Z-score
 )
+print(alldegs_zscore)
+ggsave("results/alldegs_zscore.png", plot = alldegs_zscore, height = 8, width = 8)
 ```
 
 # Differential expression analysis {#dea}
@@ -866,7 +881,11 @@ kable(degs_df[1:20,], format = "markdown", caption = "Top 20 DEGs") %>%
 ## MA plot
 
 ```{r}
-plotMA(res, ylim=c(-7,7))
+plotMA(res, ylim=c(-7,7), main = "MA plot")
+
+png(filename = "results/MAplot.png", width = 700, height = 600)
+plotMA(res, ylim=c(-7,7), main = "MA plot")
+dev.off()
 ```
 
 ## Volcano plot
@@ -880,7 +899,7 @@ res_df$highlight <- rownames(res_df)
 res_df$highlight[!(res_df$highlight %in% intGenes)] <- NA
 
 # Plotting
-volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
+volcano_intgenes <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
   # Log2FC threshold
   geom_vline(xintercept = c(-1, 1), col = "black", linetype = 'dashed') +
   # padj threshold
@@ -898,8 +917,8 @@ volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col =
   scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
   geom_text_repel(max.overlaps = Inf, color = "black") # To show all labels 
 
-print(volcano)
-#ggsave("volcano.png", plot = volcano, height = 10, width = 15)
+print(volcano_intgenes)
+ggsave("results/volcano_intgenes.png", plot = volcano_intgenes, height = 10, width = 15)
 ```
 
 DEGs
@@ -910,7 +929,7 @@ res_df$highlight <- rownames(res_df)
 res_df$highlight[!(res_df$highlight %in% top20)] <- NA
 
 # Plotting
-volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
+volcano_top20 <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
   # Log2FC threshold
   geom_vline(xintercept = c(-1, 1), col = "black", linetype = 'dashed') +
   # padj threshold
@@ -928,8 +947,8 @@ volcano <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col =
   scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
   geom_text_repel(max.overlaps = Inf, color = "black") # To show all labels 
 
-print(volcano)
-#ggsave("volcano.png", plot = volcano, height = 10, width = 15)
+print(volcano_top20)
+ggsave("results/volcano_top20.png", plot = volcano_top20, height = 10, width = 15)
 ```
 
 ## Karyoplot
@@ -1049,19 +1068,18 @@ ctsAdj <- ctsAdj[,match(colnames(cts), colnames(ctsAdj))]
 
 ```{r}
 # List of lists of DEGs
-all_degs <- list(original = degs_orig, replication = degs, collapsed = degs_collapsed)
+all_degs <- list(original = degs_orig, replication = degs)
 
-ggvenn(
+venn <- ggvenn(
   all_degs, 
-  fill_color = c("#0073C2FF", "#EFC000FF", "#CD534CFF"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
   stroke_size = 0.5, 
   set_name_size = 4
   )
+print(venn)
+ggsave("results/venn.png", plot = venn, height = 5, width = 5)
 
-intersec_degs <- degs_orig[degs_orig %in% degs_collapsed]
-intersec_degs <- intersec_degs[intersec_degs %in% degs]
-
-intersec_degs
+intersec_degs <- degs[degs %in% degs_orig]
 ```
 
 # Functional analysis {#gsea}
