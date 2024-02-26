@@ -217,12 +217,23 @@ library(gage)
 library(gageData)
 library(sva) #combatseq
 library(webshot2)
-
+library(karyoploteR)
+library(vsn)
+library(writexl)
+library(RColorBrewer)
 ```
 
 # Data wrangling {#dw}
 
 ## Structuring
+
+### Results directory
+
+```{r}
+if (!file.exists("results")){
+  dir.create("results")
+}
+```
 
 ### data importation
 
@@ -232,7 +243,8 @@ All data was obtained from PRJNA600245 / SRP240925. The FastQs were downloaded w
 
 ```{r}
 # importation (better way?)
-cts <- as.data.frame(as.matrix(fread("counts.out", skip = 1, sep = "\t"), rownames = 1, colnames = 1))
+cts_brute <- as.data.frame(as.matrix(fread("counts.out", skip = 1, sep = "\t"), rownames = 1, colnames = 1))
+cts <- cts_brute
 
 # removing unecessary columns (gene location, etc.)
 cts <- cts[,grepl("SRR", colnames(cts))]
@@ -273,7 +285,8 @@ sample_genes <- rownames(cts)
 
 ```{r}
 # importation
-meta <- read.delim("sample_metadata.txt", sep = ",", row.names = 1)
+meta_brute <- read.delim("sample_metadata.txt", sep = ",", row.names = 1)
+meta <- meta_brute
 
 # removing unecessary columns (variables)
 meta <- meta[,c("Age","BIOMATERIAL_PROVIDER","BioSample","differentiation_protocol","disease","isolate")]
@@ -355,9 +368,6 @@ res_df <- as.data.frame(res)
 ntd <- normTransform(dds)
 norm_df <- as.data.frame(assay(ntd))
 
-# Genes of interest for Down Syndrome
-#View(res_df[which(rownames(res_df) %in% intGenes),])
-
 ```
 
 ## Identifying DEGs
@@ -378,17 +388,53 @@ top20 <- rownames(head(degs_df, 20))
 
 # Exploratory analysis {#exp}
 
+## Normalization methods
+
+```{r}
+# Verifying normalization methods
+#vsd <- vst(dds, blind = F)
+#rld <- rlog(dds, blind = F)
+
+normMethod <- meanSdPlot(assay(ntd))$gg + labs(title = "Variance Plot")
+print(normMethod)
+ggsave("results/variancePlot.png", plot = normMethod, height = 4, width = 5)
+
+  #meanSdPlot(assay(vsd))
+#meanSdPlot(assay(rld))
+```
+
+## Sample-to-sample distance
+
+```{r}
+sampleDists <- dist(t(assay(ntd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+sampToSamp <- pheatmap(
+  sampleDistMatrix,
+  main = "Sample to sample distances",
+  annotation_col = meta[,c("condition","donor")],
+  annotation_row = meta[,c("condition","donor")],
+  annotation_names_col = FALSE,
+  annotation_names_row = FALSE,
+  show_colnames = FALSE,
+  clustering_distance_rows = sampleDists,
+  clustering_distance_cols = sampleDists,
+  col = colorRampPalette(rev(brewer.pal(9, "Blues")))(255),
+  angle_col = 45,
+)
+ggsave("results/sampToSamp.png", plot = sampToSamp, height = 6, width = 8)
+```
+
 ## Dimensionality reduction
 
 ### PCA
 
 ```{r}
-# Normalized matrix
-vsd <- vst(dds, blind=FALSE)
 
 for (i in colnames(meta)){
-  pca_plot <- plotPCA(vsd, intgroup = i) +
+  pca_plot <- plotPCA(ntd, intgroup = i) +
     labs(title = "PCA plot", subtitle = paste0("Looking at ", i))
+  ggsave(paste0("results/PCA_", i, ".png"), plot = pca_plot, height = 4, width = 5)
   print(pca_plot)
 }
 ```
@@ -396,7 +442,11 @@ for (i in colnames(meta)){
 ## Cooks distance
 
 ```{r}
-boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
+boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2, main = "Cooks distance")
+
+png(filename = "results/cooks.png", width = 1000, height = 600)
+boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2, main = "Cooks distance")
+dev.off()
 ```
 
 ## Molecular degree perturbation
@@ -412,6 +462,8 @@ boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
 # Basic expression analysis {#basic}
 
 ## Box plot
+
+<https://r-graphics.org/recipe-annotate-facet>
 
 ```{r}
 # Long format for genes of interest
@@ -437,25 +489,28 @@ long_degs$expression <- as.numeric(long_degs$expression)
 Genes of interest - all together
 
 ```{r}
-ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
-  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+intGene_g <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
+  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+ #jitters scatters randomly everytime
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   labs(
-    title = "Boxplot",
-    subtitle = "Genes of interest"
+    title = "Genes of interest",
+    caption = "* significant (DE padj < 0.05)",
+    x = NULL,
+    y = "DESeq2 normalized expression"
   )+ 
   theme(
     panel.background = element_rect(fill = "white"),
     panel.grid = element_line(color = "gray", linetype = "dotted")
   )
-
+print(intGene_g)
+ggsave("results/intGene_grouped.png", plot = intGene_g, height = 5, width = 25)
 ```
 
 Genes of interest - separated
 
 ```{r}
 # include log2FC and padj values for each?
-ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
+intGene_s <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
   geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+ #jitters scatters randomly everytime
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   facet_wrap(~gene, scales = "free")+ # separated box plots
@@ -472,40 +527,61 @@ ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
     strip.background = element_rect(fill="#D1FFBD"),
     axis.text.x = element_blank() #removes bottom gene name
   )
+print(intGene_s)
+ggsave("results/intGene_separated.png", plot = intGene_s, height = 10, width = 10)
 ```
 
 DEGs - all together
 
 ```{r}
-ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
-  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+degs_g <- ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
+  geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+ # plotetd behind the boxplot
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   labs(
-    title = "Boxplot",
-    subtitle = "Top 20 DEGs"
+    title = "Top 20 DEGs",
+    x = NULL,
+    y = "DESeq2 normalized expression"
   )+ 
   theme(
     panel.background = element_rect(fill = "white"),
     panel.grid = element_line(color = "gray", linetype = "dotted")
   )
+print(degs_g)
+ggsave("results/degs_grouped.png", plot = degs_g, height = 5, width = 20)
 ```
 
 DEGs - separated
 
 ```{r}
-ggplot(long_degs, aes(x = gene, y = expression, fill = condition)) +
-  #geom_jitter(position = position_jitter(width = 0.3), color = "#888888", size = 1.5, alpha = 0.9)+ # plotetd behind the plot
+fc_annots <- data.frame(gene = top20, annot = degs_df[1:20, "log2FoldChange"])
+fc_annots$annot <- paste0("log2FC:\n", round(fc_annots$annot,2))
+# colocar o padj também na esquerda em cima de cada facet wrap?
+
+degs_s <- ggplot(long_degs, aes(x = gene, y = expression, fill = condition))+
   geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   facet_wrap(~gene, scales = "free")+
+  geom_text(
+    x = Inf, y = Inf,
+    aes(label = fc_annots$annot[match(gene, fc_annots$gene)]),
+    hjust = 1, 
+    vjust = 1, 
+    size = 3,
+    color = "#444444"
+  ) +
   labs(
-    title = "Boxplot",
-    subtitle = "Top 20 DEGs"
+    title = "Top 20 DEGs",
+    x = NULL,
+    y = "DESeq2 normalized expression"
   )+ 
   theme(
     panel.background = element_rect(fill = "white"),
-    panel.grid = element_line(color = "gray", linetype = "dotted")
+    panel.grid = element_line(color = "gray", linetype = "dotted"),
+    strip.background = element_rect(fill="#fffbc8"),
+    axis.text.x = element_blank() #removes bottom gene name
   )
+print(degs_s)
+ggsave("results/degs_separated.png", plot = degs_s, height = 8, width = 12)
 ```
 
 ## Heatmaps
@@ -530,12 +606,12 @@ pheatmap(
   show_rownames = FALSE, 
   cluster_cols = FALSE,
   show_colnames = FALSE,
-  treeheight_row = 0,
+  treeheight_row = 0, # hide dendograms
   #labels_col = sapply(1:24, function(i) paste0("S", i), simplify = FALSE), # colnanmes
   angle_col = 45,
   fontsize_col = 9,
   annotation_col = local_meta[,c("differentiation_protocol","donor", "condition")],
-  annotation_names_col = FALSE,
+  annotation_names_col = FALSE, # remove annotation name next to heatmap
   na_col = "#555555",
   gaps_col = 12,
   color = hcl.colors(50, "BluYl")
@@ -638,7 +714,11 @@ pheatmap(
   na_col = "#555555",
   gaps_col = 12,
   scale = "row", # Z-score
-  annotation_colors = list(log2FoldChange = c('blue', 'white', 'red'), significance = c(sig = 'lightgreen', notSig = 'white')) # set log2fc 0 to white
+  annotation_colors = list(
+    log2FoldChange = colorRampPalette(c("#0096c7", "white", "#ff2c2c"))(
+        max(abs(rowannot$log2FoldChange)) * sign(rowannot$log2FoldChange)), 
+    significance = c(sig = 'lightgreen', notSig = 'white')
+  )
 )
 
 ```
@@ -773,12 +853,12 @@ pheatmap(
 # Genes of interest
 int_df <- res_df[rownames(res_df) %in% intGenes,]
 
-kable(int_df[order(int_df$padj),], format = "html", caption = "Genes of interest") %>%
+kable(int_df[order(int_df$padj),], format = "markdown", caption = "Genes of interest") %>%
   kable_styling()
 #save_kable(file = "complement_table.png", table)
 
 # Top 20 DEGs
-kable(degs_df[1:20,], format = "html", caption = "Top 20 DEGs") %>%
+kable(degs_df[1:20,], format = "markdown", caption = "Top 20 DEGs") %>%
   kable_styling()
 #save_kable("degs.html", res_table)
 ```
@@ -855,6 +935,12 @@ print(volcano)
 ## Karyoplot
 
 <https://bernatgel.github.io/karyoploter_tutorial//Examples/MultipleDataTypes/MultipleDataTypes.html>
+
+```{r}
+
+```
+
+## Manhattan plot
 
 ```{r}
 
@@ -1114,10 +1200,26 @@ hsa04110 <- pathview(gene.data  = geneList,
                      limit      = list(gene=max(abs(geneList)), cpd=1))
 ```
 
-# Image for the paper
+# Exporting results
 
 INKscape para montar imagens pro paper.
 
 ```{r}
+# Brute counts matrix
+write_xlsx(cts_brute, "results/bruteCts.xlsx")
+# Filtered counts matrix
+write_xlsx(cts, "results/filtCts.xlsx")
+
+# Brute metadata
+write_xlsx(meta_brute, "results/bruteMeta.xlsx")
+# Cleaned metadata
+write_xlsx(meta, "results/cleanMeta.xlsx")
+
+# Differential expression results
+write_xlsx(res_df, "results/DEres.xlsx")
+# DEGS data frame
+write_xlsx(degs_df, "results/DEGs.xlsx")
+
+# Over representation GO results
 
 ```
