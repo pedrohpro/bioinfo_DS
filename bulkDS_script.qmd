@@ -221,6 +221,7 @@ library(karyoploteR)
 library(vsn)
 library(writexl)
 library(RColorBrewer)
+library(qqman)
 ```
 
 # Data wrangling {#dw}
@@ -258,14 +259,27 @@ cts <- mutate_all(cts, as.numeric)
 # Adding gene name next to ENSEMBL id with biomaRt
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 all_features <- getBM(
-  attributes = c("ensembl_gene_id", "external_gene_name"),
+  attributes = c("ensembl_gene_id", "external_gene_name", "gene_biotype", "chromosome_name"),
   filters = "ensembl_gene_id",
   values = rownames(cts),
   mart = ensembl
 )
+
+# Preparing re-annotation
 all_features <- all_features[match(rownames(cts), all_features$ensembl_gene_id),] #matching order
 all_features$external_gene_name[all_features$external_gene_name == ""] <- "NA"
+
+# Re-annotating
 rownames(cts) <- paste0(all_features$ensembl_gene_id, "|", all_features$external_gene_name)
+
+# Keeping only 23 human chr genes and protein coding genes
+cts <- cts[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "Y") & (all_features$gene_biotype == "protein_coding")),]
+
+# Correcting row metadata df (all_features)
+all_features <- all_features[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "Y") & (all_features$gene_biotype == "protein_coding")), -which(colnames(all_features) == "ensembl_gene_id")]
+all_features <- all_features[all_features$external_gene_name != "NA",]
+all_features <- all_features[!duplicated(all_features$external_gene_name),]
+all_features$chromosome_name <- as.factor(all_features$chromosome_name)
 
 # Remove all features named as NA
 cts <- cts[substring(rownames(cts), 17) != "NA",]
@@ -344,6 +358,11 @@ for (i in 1:nrow(cts)) {
   } 
 }
 cts <- cts[as.numeric(filter),]
+
+# Filtering genes based on variance by condition???
+
+# Adjusting all_features
+all_features <- all_features[all_features$external_gene_name %in% rownames(cts),] 
 ```
 
 # DESeq2 {#deseq}
@@ -509,11 +528,34 @@ ggsave("results/intGene_grouped.png", plot = intGene_g, height = 5, width = 25)
 Genes of interest - separated
 
 ```{r}
+fc_annots <- res_df[rownames(res_df) %in% intGenes,c("log2FoldChange","padj")]
+colnames(fc_annots)[colnames(fc_annots) == "log2FoldChange"] <- "log2fc"
+rownames(fc_annots)[fc_annots$padj < 0.05] <- paste0(rownames(fc_annots)[fc_annots$padj < 0.05], " *")
+fc_annots$log2fc <- paste0("log2FC:\n", round(fc_annots$log2fc,2))
+fc_annots$padj <- paste0("padj:\n", signif(fc_annots$padj, digits=2))
+fc_annots$gene <- rownames(fc_annots)
+
 # include log2FC and padj values for each?
 intGene_s <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
   geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+ #jitters scatters randomly everytime
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   facet_wrap(~gene, scales = "free")+ # separated box plots
+  geom_text( # log2fc annotation
+    x = Inf, y = Inf,
+    aes(label = fc_annots$log2fc[match(gene, fc_annots$gene)]),
+    hjust = 1, 
+    vjust = 1, 
+    size = 3,
+    color = "#006400"
+  ) +
+  geom_text( # padj annotation
+    aes(label = fc_annots$padj[match(gene, fc_annots$gene)]),
+    x = -Inf, y = Inf,
+    hjust = 0,
+    vjust = 1,
+    size = 3,
+    color = "#006400"
+  ) +
   labs(
     title = "Genes of interest",
     #subtitle = "",
@@ -528,7 +570,7 @@ intGene_s <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
     axis.text.x = element_blank() #removes bottom gene name
   )
 print(intGene_s)
-ggsave("results/intGene_separated.png", plot = intGene_s, height = 10, width = 10)
+ggsave("results/intGene_separated.png", plot = intGene_s, height = 10, width = 15)
 ```
 
 DEGs - all together
@@ -553,21 +595,29 @@ ggsave("results/degs_grouped.png", plot = degs_g, height = 5, width = 20)
 DEGs - separated
 
 ```{r}
-fc_annots <- data.frame(gene = top20, annot = degs_df[1:20, "log2FoldChange"])
-fc_annots$annot <- paste0("log2FC:\n", round(fc_annots$annot,2))
-# colocar o padj também na esquerda em cima de cada facet wrap?
+fc_annots <- data.frame(gene = top20, log2fc = degs_df[1:20, "log2FoldChange"], padj = degs_df[1:20, "padj"])
+fc_annots$log2fc <- paste0("log2FC:\n", round(fc_annots$log2fc,2))
+fc_annots$padj <- paste0("padj:\n", signif(fc_annots$padj, digits=2))
 
 degs_s <- ggplot(long_degs, aes(x = gene, y = expression, fill = condition))+
   geom_point(position = position_jitterdodge(jitter.width=0.2), color = "#550000", size = 1, alpha = 0.9)+
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   facet_wrap(~gene, scales = "free")+
-  geom_text(
+  geom_text( # log2fc annotation
     x = Inf, y = Inf,
-    aes(label = fc_annots$annot[match(gene, fc_annots$gene)]),
+    aes(label = fc_annots$log2fc[match(gene, fc_annots$gene)]),
     hjust = 1, 
     vjust = 1, 
     size = 3,
-    color = "#444444"
+    color = "#006400"
+  ) +
+  geom_text( # padj annotation
+    aes(label = fc_annots$padj[match(gene, fc_annots$gene)]),
+    x = -Inf, y = Inf,
+    hjust = 0,
+    vjust = 1,
+    size = 3,
+    color = "#006400"
   ) +
   labs(
     title = "Top 20 DEGs",
@@ -951,7 +1001,15 @@ print(volcano_top20)
 ggsave("results/volcano_top20.png", plot = volcano_top20, height = 10, width = 15)
 ```
 
-## Karyoplot
+## GWAS plots
+
+```{r}
+# Adding gene chr location to results_df
+all_features <- all_features[match(rownames(res_df), all_features$external_gene_name),] 
+res_df$chr <- all_features$chromosome_name
+```
+
+### Karyoplot
 
 <https://bernatgel.github.io/karyoploter_tutorial//Examples/MultipleDataTypes/MultipleDataTypes.html>
 
@@ -959,7 +1017,15 @@ ggsave("results/volcano_top20.png", plot = volcano_top20, height = 10, width = 1
 
 ```
 
-## Manhattan plot
+### Manhattan plot
+
+<https://r-graph-gallery.com/101_Manhattan_plot.html>
+
+```{r}
+
+```
+
+### Percentage plot
 
 ```{r}
 
