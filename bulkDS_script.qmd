@@ -279,7 +279,7 @@ cts <- cts[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "
 all_features <- all_features[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "Y") & (all_features$gene_biotype == "protein_coding")), -which(colnames(all_features) == "ensembl_gene_id")]
 all_features <- all_features[all_features$external_gene_name != "NA",]
 all_features <- all_features[!duplicated(all_features$external_gene_name),]
-all_features$chromosome_name <- as.factor(all_features$chromosome_name)
+all_features$chromosome_name <- factor(all_features$chromosome_name, levels = c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X")) # for better images
 
 # Remove all features named as NA
 cts <- cts[substring(rownames(cts), 17) != "NA",]
@@ -383,6 +383,10 @@ dds <- DESeq(dds)
 res <- results(dds)
 res_df <- as.data.frame(res)
 
+# Adding gene chr location to results_df
+all_features <- all_features[match(rownames(res_df), all_features$external_gene_name),] 
+res_df$chr <- all_features$chromosome_name
+
 # Getting normalized matrix
 ntd <- normTransform(dds)
 norm_df <- as.data.frame(assay(ntd))
@@ -401,6 +405,7 @@ res_df$DEG <- factor(res_df$DEG)
 # Top DEGs
 degs_df <- res_df[!grepl("NO", res_df$DEG),]
 degs_df <- degs_df[order(-abs(degs_df$log2FoldChange)),] #absolute value
+degs_df$DEG <- factor(degs_df$DEG)
 degs <- rownames(degs_df)
 top20 <- rownames(head(degs_df, 20))
 ```
@@ -1003,12 +1008,6 @@ ggsave("results/volcano_top20.png", plot = volcano_top20, height = 10, width = 1
 
 ## GWAS plots
 
-```{r}
-# Adding gene chr location to results_df
-all_features <- all_features[match(rownames(res_df), all_features$external_gene_name),] 
-res_df$chr <- all_features$chromosome_name
-```
-
 ### Karyoplot
 
 <https://bernatgel.github.io/karyoploter_tutorial//Examples/MultipleDataTypes/MultipleDataTypes.html>
@@ -1025,10 +1024,58 @@ res_df$chr <- all_features$chromosome_name
 
 ```
 
-### Percentage plot
+### DEGs by Chromosome plot
 
 ```{r}
+# Transforming cluster and sample columns into table format
+tab_chr <- as.data.frame(table(chr = degs_df$chr, cond = degs_df$DEG))
 
+tab_chr$cond <- relevel(tab_chr$cond, ref = "UP") # for up to be on top
+
+tab_chr$pct <- ave(tab_chr$Freq, tab_chr$chr, FUN = function(x) (x / sum(x)) * 100) # percentage
+```
+
+Absolute value
+
+```{r}
+# Plot the bar plot
+ggplot(tab_chr, aes(x = chr, y = Freq, fill = cond)) +
+  geom_bar(stat = "identity") +
+  #geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            #position = position_stack(vjust = 0.5),
+            #size = 3, 
+            #color = "black") +
+  labs(title = "DEGs across chromosomes",
+    x = "Chromosome",
+    y = "Number of genes",
+    caption = "* All samples came from male donors",
+    fill = "Cell type"
+  ) +
+  scale_fill_manual(values = c("UP" = "#ed2939", "DOWN" = "#006fb9")) +
+  theme_minimal()
+
+# Plot number of overall genes by chromosome too?
+```
+
+Percentage
+
+```{r}
+# Plot the bar plot
+ggplot(tab_chr, aes(x = chr, y = pct, fill = cond)) +
+  geom_bar(stat = "identity") +
+  #geom_text(aes(x = chr, y = tab_chr$total_freq + 1, label = tab_chr$total_freq),  # Adjust y position slightly above bars
+            #vjust = -0.5,  # Align text at the top
+            #hjust = 0.5,  # Center text horizontally
+            #size = 3,  # Adjust text size for better visibility
+            #color = "black") +  # Set text color to black
+  labs(title = "Percentage of DEGs across chromosomes",
+    x = "Chromosome",
+    y = "Percentage",
+    caption = "* All samples came from male donors",
+    fill = "Cell type"
+  ) +
+  scale_fill_manual(values = c("UP" = "#ed2939", "DOWN" = "#006fb9")) +
+  theme_minimal()
 ```
 
 # Alternative analysis
