@@ -193,35 +193,35 @@ rm(list = ls())     # clears Environment
 # Library importation
 
 ```{r}
-library(tidyverse)
+library(tidyverse) #do it all
 library(DESeq2)  
 library(ComplexHeatmap)
+library(pheatmap)
 library(data.table)
-library(org.Hs.eg.db)
-library(biomaRt)
+library(org.Hs.eg.db) #Homo sapiens OrgDb
+library(biomaRt) #gene annotations
 library(RColorBrewer)
 library(ggrepel)
 library(umap)
-library(pheatmap)
 library(mdp)
 library(kableExtra)
-library(readxl)
-library(ggvenn)
-library(clusterProfiler)
+library(readxl) #excel
+library(writexl) #excel
+library(VennDiagram) #venn digrams
+library(clusterProfiler) #functional analysis
 library(pathview)
 library(cowplot)
 library(GOplot)
 library(enrichplot)
-library(pathview)
 library(gage)
 library(gageData)
 library(sva) #combatseq
 library(webshot2)
-library(karyoploteR)
+library(karyoploteR) #GWAS plots
 library(vsn)
-library(writexl)
 library(RColorBrewer)
 library(scales)
+library(ReactomePA) #REACTOME
 ```
 
 # Data wrangling {#dw}
@@ -233,6 +233,8 @@ library(scales)
 ```{r}
 if (!file.exists("results")){
   dir.create("results")
+  dir.create("results/functional")
+  dir.create("results/tables")
 }
 ```
 
@@ -257,9 +259,9 @@ colnames(cts) <- substring(colnames(cts), 6, 16)
 cts <- mutate_all(cts, as.numeric)
 
 # Adding gene name next to ENSEMBL id with biomaRt
-ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl") #useMart or useEnsembl?
 all_features <- getBM(
-  attributes = c("ensembl_gene_id", "external_gene_name", "gene_biotype", "chromosome_name", "start_position", "end_position"),
+  attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype", "chromosome_name", "start_position", "end_position"),
   filters = "ensembl_gene_id",
   values = rownames(cts),
   mart = ensembl
@@ -275,7 +277,7 @@ rownames(cts) <- paste0(all_features$ensembl_gene_id, "|", all_features$external
 # Keeping only 23 human chr genes and protein coding genes
 cts <- cts[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "Y") & (all_features$gene_biotype == "protein_coding")),]
 
-# Correcting row metadata df (all_features)
+# Correcting row metadata df (all_features) - (NOTE: careful with which entrez ids are staying)
 all_features <- all_features[(all_features$chromosome_name %in% c(as.character(seq(1, 22)), "X", "Y") & (all_features$gene_biotype == "protein_coding")), -which(colnames(all_features) == "ensembl_gene_id")]
 all_features <- all_features[all_features$external_gene_name != "NA",]
 all_features <- all_features[!duplicated(all_features$external_gene_name),]
@@ -290,9 +292,6 @@ cts <- as.matrix(cts) # to be able to have duplicated rownames
 rownames(cts) <- substring(rownames(cts), 17)
 cts <- rowsum(cts, rownames(cts))
 cts <- as.data.frame(cts)
-
-# Registering sample genes for downstream functional analysis
-sample_genes <- rownames(cts)
 
 ```
 
@@ -364,6 +363,11 @@ cts <- cts[as.numeric(filter),]
 
 # Adjusting all_features
 all_features <- all_features[all_features$external_gene_name %in% rownames(cts),] 
+
+# Registering sample genes for downstream functional analysis
+sample_genes <- rownames(cts)
+all_features$entrezgene_id <- as.character(all_features$entrezgene_id)
+sample_genes_entrez <- all_features[all_features$external_gene_name %in% sample_genes,]$entrezgene_id
 ```
 
 # DESeq2 {#deseq}
@@ -502,6 +506,7 @@ norm_int <- norm_df[rownames(norm_df) %in% intGenes,]
 local_int_res <- res_df[rownames(res_df) %in% intGenes,]
 local_int_res <- local_int_res[match(rownames(norm_int), rownames(local_int_res)),]
 rownames(norm_int)[local_int_res$padj < 0.05] <- paste0(rownames(norm_int)[local_int_res$padj < 0.05], " *") # adding sig asterisk
+rownames(norm_int)[local_int_res$padj < 0.05 & abs(local_int_res$log2FoldChange) > 1] <- paste0(rownames(norm_int)[local_int_res$padj < 0.05 & abs(local_int_res$log2FoldChange) > 1], "*") # adding sig asterisk for DEGs only
 norm_int["condition",] <- meta$condition
 norm_int <- as.data.frame(t(norm_int))
 long_int <- norm_int %>% pivot_longer(cols = -condition, names_to = "gene", values_to = "expression")
@@ -525,7 +530,7 @@ intGene_g <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
   geom_boxplot(alpha = 0.5)+ # because points are behind decrease opacity
   labs(
     title = "Genes of interest",
-    caption = "* significant (DE padj < 0.05)",
+    caption = "* significant (DE padj < 0.05), ** significant and DEG (|log2fc| > 1)",
     x = NULL,
     y = "DESeq2 normalized expression"
   )+ 
@@ -542,7 +547,13 @@ Genes of interest - separated
 ```{r}
 fc_annots <- res_df[rownames(res_df) %in% intGenes,c("log2FoldChange","padj")]
 colnames(fc_annots)[colnames(fc_annots) == "log2FoldChange"] <- "log2fc"
+
+fc_annots$color <- "#D1FFBD"
+fc_annots$color[fc_annots$padj < 0.05] <- "#FFFFCC"
+fc_annots$color[fc_annots$padj < 0.05 & abs(fc_annots$log2fc) > 1] <- "#FFD0D6"
+
 rownames(fc_annots)[fc_annots$padj < 0.05] <- paste0(rownames(fc_annots)[fc_annots$padj < 0.05], " *")
+rownames(fc_annots)[fc_annots$padj < 0.05 & abs(fc_annots$log2fc) > 1] <- paste0(rownames(fc_annots)[fc_annots$padj < 0.05 & abs(fc_annots$log2fc) > 1], "*")
 fc_annots$log2fc <- paste0("log2FC:\n", round(fc_annots$log2fc,2))
 fc_annots$padj <- paste0("padj:\n", signif(fc_annots$padj, digits=2))
 fc_annots$gene <- rownames(fc_annots)
@@ -569,9 +580,9 @@ intGene_s <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
     color = "#006400"
   ) +
   labs(
-    title = "Genes of interest",
+    #title = "Genes of interest",
     #subtitle = "",
-    caption = "* significant (DE padj < 0.05)",
+    #caption = "* significant (DE padj < 0.05), ** significant and DEG (|log2fc| > 1)",
     x = NULL,
     y = "DESeq2 normalized expression"
   )+ 
@@ -581,8 +592,9 @@ intGene_s <- ggplot(long_int, aes(x = gene, y = expression, fill = condition)) +
     strip.background = element_rect(fill="#D1FFBD"),
     axis.text.x = element_blank() #removes bottom gene name
   )
+
 print(intGene_s)
-ggsave("results/intGene_separated.png", plot = intGene_s, height = 10, width = 15)
+ggsave("results/intGene_separated.png", plot = intGene_s, height = 12, width = 15)
 ```
 
 DEGs - all together
@@ -958,7 +970,7 @@ Genes of interest
 
 # Genes to highlight
 res_df$highlight <- rownames(res_df)
-res_df$highlight[!(res_df$highlight %in% intGenes)] <- NA
+res_df$highlight[!(res_df$highlight %in% c("APP","C3","CFI","C4A","C4B","IFNAR1","IFNAR2","IL10RB","IL6","S100B","SOD1"))] <- NA
 
 # Plotting
 volcano_intgenes <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(padj), col = DEG, label = highlight)) +
@@ -967,20 +979,24 @@ volcano_intgenes <- ggplot(data = res_df, aes(x = log2FoldChange, y = -log10(pad
   # padj threshold
   geom_hline(yintercept = -log10(0.05), col = "black", linetype = 'dashed') +
   geom_point(size = 2) +
-  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"),labels = c("Downregulated", "Not significant", "Upregulated")) + 
-  coord_cartesian(ylim = c(0, 10), xlim = c(-7, 7)) + # how much zoom
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"),labels = c("DOWN", "NO", "UP")) + 
+  coord_cartesian(ylim = c(0, max(-log10(res_df$padj))), xlim = c(min(res_df$log2FoldChange), max(res_df$log2FoldChange))) + # how much zoom
   labs(
-    color = "Differential\nexpression",
+    color = "DEG",
     x = expression("log"[2]*"FC"), 
-    y = expression("-log"[10]*"padj"),
-    title = "Differentially expressed genes",
-    subtitle = "Comparing DS against CT (|log2fc| > 1, padj < 0.05)"
+    y = expression("-log"[10]*"padj")
+    #title = "Differentially expressed genes",
+    #subtitle = "Comparing DS against CT (|log2fc| > 1, padj < 0.05)"
     ) +
   scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
-  geom_text_repel(max.overlaps = Inf, color = "black") # To show all labels 
+  geom_text_repel(max.overlaps = Inf, color = "black")+ # To show all labels 
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.grid = element_line(color = "gray", linetype = "dotted")
+  )
 
 print(volcano_intgenes)
-ggsave("results/volcano_intgenes.png", plot = volcano_intgenes, height = 10, width = 15)
+ggsave("results/volcano_intgenes.png", plot = volcano_intgenes, height = 10, width = 8)
 ```
 
 DEGs
@@ -1112,7 +1128,7 @@ dev.off()
 <https://r-graph-gallery.com/101_Manhattan_plot.html>
 
 ```{r}
-
+# All signif gene alterations
 manhat <- ggplot(res_df, aes(x = chr, y = log2FoldChange, color = alterat, label = highlight))+
   # geom_rect(
   #   data = data.frame(
@@ -1155,7 +1171,7 @@ all_chr <- as.data.frame(table(chr = res_df$chr, cond = res_df$DEG))
 all_chr$cond <- factor(all_chr$cond, levels = c("UP","DOWN","NO")) # for up to be on top
 all_chr$pct <- ave(all_chr$Freq, all_chr$chr, FUN = function(x) (x / sum(x)) * 100)
 
-# For all genes
+# For all significant
 alt_chr <- as.data.frame(table(chr = res_df$chr, cond = res_df$alterat))
 alt_chr$cond <- factor(alt_chr$cond, levels = c("UP","DOWN","NO")) # for up to be on top
 alt_chr$pct <- ave(alt_chr$Freq, alt_chr$chr, FUN = function(x) (x / sum(x)) * 100)
@@ -1174,7 +1190,7 @@ ndegs <- ggplot(tab_chr, aes(x = chr, y = Freq, fill = cond)) +
     #position = position_stack(vjust = 0.5),
     #size = 3, 
     #color = "black") +
-  labs(title = "DEGs across chromosomes",
+  labs(title = "Proportion of DEGs across chromosomes",
     x = "Chromosome",
     y = "Number of genes",
     fill = NULL
@@ -1204,7 +1220,7 @@ degsallgenes <- ggplot(all_chr, aes(x = chr, y = Freq, fill = cond)) +
     #position = position_stack(vjust = 0.5),
     #size = 3, 
     #color = "black") +
-  labs(title = "Gene alterations across chromosomes",
+  labs(title = "Number of DEGs across chromosomes",
     x = "Chromosome",
     y = "Number of genes",
     fill = NULL
@@ -1214,6 +1230,24 @@ degsallgenes <- ggplot(all_chr, aes(x = chr, y = Freq, fill = cond)) +
 
 print(degsallgenes)
 ggsave("results/degsallgenes.png", plot = degsallgenes, height = 3, width = 7)
+
+# Signif alterations over all genes
+numalt <- ggplot(alt_chr, aes(x = chr, y = Freq, fill = cond)) +
+  geom_bar(stat = "identity") +
+  #geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+    #position = position_stack(vjust = 0.5),
+    #size = 3, 
+    #color = "black") +
+  labs(title = "Number of gene alterations across chromosomes",
+    x = "Chromosome",
+    y = "Number of genes",
+    fill = NULL
+  ) +
+  scale_fill_manual(values = c("UP" = "#ed2939", "DOWN" = "#006fb9", "NO" = "yellow")) +
+  theme_minimal()
+
+print(numalt)
+ggsave("results/numalt.png", plot = numalt, height = 3, width = 7)
 ```
 
 Percentage
@@ -1277,9 +1311,357 @@ print(pctaltgenes)
 ggsave("results/pctaltgenes.png", plot = pctaltgenes, height = 3, width = 7)
 ```
 
+# Comparing results
+
+## Venn Diagram of DEGs
+
+```{r}
+# List of lists of DEGs
+all_degs <- list(Original = degs_orig, Replication = degs)
+
+# Genes common in both studies
+intersec_degs <- degs[degs %in% degs_orig]
+
+# Plotting
+venn <- venn.diagram(
+  x = all_degs,
+  main = "DEGs from original paper\nand this replication",
+  main.cex = 2,
+  main.col = "darkgreen",
+  main.fontfamily = "sans",
+  
+  filename = NULL, #returns grid object
+  disable.logging = TRUE, #not saving logging file
+  print.mode = c("raw","percent"),
+  scaled = FALSE, #not scaled to size
+  
+  lwd = 3, #line width
+  col = c('#0073ff', '#fde725'), #color of circ
+  fill = c(alpha('#0073C2',0.3), alpha('#EFC000',0.3)), #color inside circ
+  cex = 1.5, #size numbers
+  fontfamily = "sans", #numbers font
+  fontface = "bold",
+  
+  cat.cex = 2, #category size
+  cat.default.pos = "outer", #location category text
+  cat.pos = c(-30, 30), #degree around the circle for the text (0-360)
+  cat.dist = c(0.05, 0.05), #distance of text from the border of circ
+  cat.fontfamily = "sans", #category text font
+  cat.col = c('#0073ff', '#fde725')
+)
+
+ggsave("results/venn.png", plot = venn, height = 7, width = 7) #recomended height = width for no distortion
+plot_grid(venn)
+```
+
+# Functional analysis (enrichment) {#gsea}
+
+```{r}
+# DEGs lists
+degs_ord_symbol <- rownames(degs_df[order(-degs_df$log2FoldChange),])
+degs_ord_entrez <- all_features[match(degs_ord, all_features$external_gene_name),]$entrezgene_id
+
+# DEGs log2fc lists
+degs_ord_symbol_log2fc <- res_df[match(degs_ord_symbol, rownames(res_df)),]$log2FoldChange
+names(degs_ord_symbol_log2fc) <- degs_ord_symbol
+
+degs_ord_entrez_log2fc <- res_df[match(degs_ord_symbol, rownames(res_df)),]$log2FoldChange
+names(degs_ord_entrez_log2fc) <- degs_ord_entrez
+
+```
+
+GO:0016322 -\> neuron remodelling / synaptic pruning
+
+<https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html>
+
+## Over representation analysis
+
+GO (Gene Ontology) \~ 40,000 GO terms for Homo sapiens (2022)
+
+```{r}
+# Finding GO enriched sets
+ego <- list()
+for (i in c("all", "BP", "CC", "MF")) {
+  ego[[i]] <- enrichGO(
+    keyType = "SYMBOL", #there is no preference for using SYMBOL, ENSEMBL or ENTREZ!
+    gene = degs_ord_symbol,
+    universe = sample_genes, # sample genes. IMPORTANT!!!
+    OrgDb = org.Hs.eg.db,
+    ont = i,
+    #pAdjustMethod = "bonferroni",
+    pvalueCutoff = 0.05,
+    qvalueCutoff = 0.05,
+    readable = TRUE
+  )
+}
+
+# Barplots 
+BPbar <- barplot(ego$BP, showCategory = 5) + 
+  labs(title = "GO - Biological Process") +
+  scale_fill_gradient(low = "#36013f", high = "lightblue")
+CCbar <- barplot(ego$CC, showCategory = 5) + 
+  labs(title = "GO - Cellular Component") +
+  scale_fill_gradient(low = "darkred", high = "pink")
+MFbar <- barplot(ego$MF, showCategory = 5) + 
+  labs(title = "GO - Molecular Function") +
+  scale_fill_gradient(low = "darkgreen", high = "lightgreen")
+
+# Network plots
+BPnet <- cnetplot(ego$BP, foldChange = degs_ord_symbol_log2fc) + 
+  labs(title = "GO - Biological Process") +
+  theme(plot.title = element_text(hjust = 0.5))
+CCnet <- cnetplot(ego$CC, foldChange = degs_ord_symbol_log2fc) + 
+  labs(title = "GO - Cellular Component") +
+  theme(plot.title = element_text(hjust = 0.5))
+MFnet <- cnetplot(ego$MF, foldChange = degs_ord_symbol_log2fc) + 
+  labs(title = "GO - Molecular Function") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Circle plots (careful with order)
+BPcirc <- cnetplot(ego$BP, foldChange = degs_ord_symbol_log2fc, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "GO - Biological Process") +
+  theme(plot.title = element_text(hjust = 0.5))
+CCcirc <- cnetplot(ego$CC, foldChange = degs_ord_symbol_log2fc, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "GO - Cellular Component") +
+  theme(plot.title = element_text(hjust = 0.5))
+MFcirc <- cnetplot(ego$MF, foldChange = degs_ord_symbol_log2fc, circular = TRUE, colorEdge = TRUE) + 
+  labs(title = "GO - Molecular Function") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# EMA plots
+# egoBP_pt <- pairwise_termsim(ego$BP)
+# egoCC_pt <- pairwise_termsim(ego$CC)
+# egoMF_pt <- pairwise_termsim(ego$MF)
+# BPema <- emapplot(egoBP_pt)
+# CCema <- emapplot(egoCC_pt)
+# MFema <- emapplot(egoMF_pt)
+
+# Grouping plots
+overRepGO <- plot_grid(
+  BPbar, CCbar, MFbar, BPnet, CCnet, MFnet, BPcirc, CCcirc, MFcirc, 
+  labels = "AUTO", label_size = 40) +   
+  theme(plot.background = element_rect(fill = "white"))
+
+ggsave("results/functional/overRepGO.png", plot = overRepGO, height = 35, width = 35)
+
+# Individually saving plots for paper
+ggsave("results/functional/BPbar.png", plot = BPbar, height = 4, width = 7)
+ggsave("results/functional/CCbar.png", plot = CCbar, height = 4, width = 7)
+ggsave("results/functional/MFbar.png", plot = MFbar, height = 4, width = 7)
+
+ggsave("results/functional/BPnet.png", plot = BPnet, height = 8, width = 12)
+ggsave("results/functional/CCnet.png", plot = CCnet, height = 8, width = 12)
+ggsave("results/functional/MFnet.png", plot = MFnet, height = 8, width = 12)
+
+```
+
+KEGG
+
+Weijun Luo and Cory Brouwer. Pathview: an R/Bioconductor package for pathway-based data integration and visualization. Bioinformatics, 29(14):1830-1831, 2013. doi: 10.1093/bioinformatics/btt285.
+
+```{r}
+################################
+####     KEGG pathway       ####
+################################
+
+overKEGGpath <- enrichKEGG(
+  gene = degs_ord_entrez,
+  universe = sample_genes_entrez, #very important
+  organism = 'hsa', #Homo sapiens
+  keyType = "ncbi-geneid", #entrez-id
+  pvalueCutoff = 0.05
+)
+
+for (i in 1:3) {
+  KEGGimage <- pathview(
+    gene.data  = degs_ord_entrez_log2fc,
+    pathway.id = overKEGGpath@result$ID[i],
+    species = "hsa",
+    limit = list(gene = max(abs(degs_ord_entrez_log2fc)), cpd = 1),
+    #kegg.native = FALSE, #creates pdf and also additional indications of protein interactions
+    kegg.dir = "results/functional/"
+  )
+  #print(KEGGimage)
+  #ggsave(paste0("results/KEGG_", overKEGGpath@result$ID[i], ".png"), plot = KEGGimage, height = 5, width = 5)
+}
+
+
+################################
+####      KEGG module       ####
+################################
+overKEGGmodule <- enrichMKEGG(
+  gene = degs_ord_entrez,
+  universe = sample_genes_entrez, #very important
+  organism = 'hsa', #Homo sapiens
+  keyType = "ncbi-geneid", #entrez-id
+  pvalueCutoff = 0.05
+)
+
+```
+
+REACTOME
+
+```{r}
+
+overREACTOME <- enrichPathway(
+  gene = degs_ord_entrez,
+  organism = "human",
+  universe = sample_genes_entrez, #important!
+  pvalueCutoff = 0.05, 
+  readable = TRUE
+)
+```
+
+## Gene set enrichment analysis
+
+GO (gene ontology)
+
+```{r}
+
+# Running
+ggo <- list()
+for (i in c("BP", "CC", "MF")) {
+  ggo[[i]] <- gseGO(
+    degs_ord_symbol_log2fc,
+    keyType = "SYMBOL",
+    OrgDb = org.Hs.eg.db,
+    eps = 1e-300, # more precise p-values
+    ont = i,
+    #minGSSize = 100,
+    #maxGSSize = 500,
+    pvalueCutoff = 1,
+    #verbose = FALSE
+  )
+}
+
+################################
+####   Biological process   ####
+################################
+#gseaplot2(ggo$BP, geneSetID = 1, title = paste0(ggo$BP@result$Description[1], " - padj = ", signif(ggo$BP@result$p.adjust[1], digits=2)))
+# gsea plot
+gsea_plot <- gseaplot2(
+  ggo$BP, 
+  geneSetID = 1:5, 
+  title = "Top 5 enriched Biological processes (smallest padj)",
+  #color = c("",""), #define line colors
+  pvalue_table = TRUE
+)
+ggsave("results/BPgsea.png", plot = gsea_plot, height = 6, width = 9)
+
+# dot plot
+dot_plot <- dotplot(ggo$BP, showCategory=30, title = "dot plot") #what is the ranking system here???? (não achei em nenhuma das colunas)
+ggsave("results/BPdotplot.png", plot = dot_plot, height = 10, width = 5) # e onde ta o gene ratio???
+
+################################
+####   Cellular component   ####
+################################
+# gsea plot
+gsea_plot <- gseaplot2(
+  ggo$CC, 
+  geneSetID = 1:5, 
+  title = "Top 5 enriched Cellular components (smallest padj)",
+  pvalue_table = TRUE
+)
+ggsave("results/CCgsea.png", plot = gsea_plot, height = 6, width = 9)
+
+# dot plot
+dot_plot <- dotplot(ggo$CC, showCategory=30, title = "dot plot")
+ggsave("results/CCdotplot.png", plot = dot_plot, height = 10, width = 5)
+
+
+################################
+####   Molecular function   ####
+################################
+# gsea plot
+gsea_plot <- gseaplot2(
+  ggo$MF, 
+  geneSetID = 1:5, 
+  title = "Top 5 enriched Molecular functions (smallest padj)",
+  pvalue_table = TRUE
+)
+ggsave("results/MFgsea.png", plot = gsea_plot, height = 9, width = 15)
+
+# dot plot
+dot_plot <- dotplot(ggo$MF, showCategory=30, title = "dot plot")
+ggsave("results/MFdotplot.png", plot = dot_plot, height = 10, width = 5)
+
+```
+
+KEGG
+
+```{r}
+################################
+####     KEGG pathway       ####
+################################
+gseKEGGpathway <- gseKEGG(
+  geneList = degs_ord_entrez_log2fc,
+  organism = 'hsa',
+  keyType = "ncbi-geneid",
+  #minGSSize = 120,
+  pvalueCutoff = 0.05,
+  verbose = FALSE
+)
+
+################################
+####      KEGG module       ####
+################################
+gseKEGGmodule <- gseMKEGG(
+  geneList = degs_ord_entrez_log2fc,
+  organism = 'hsa',
+  keyType = "ncbi-geneid",
+  #minGSSize = 120,
+  pvalueCutoff = 0.05,
+  verbose = FALSE
+)
+
+
+```
+
+REACTOME
+
+```{r}
+
+gseREACTOME <- gsePathway(
+  degs_ord_entrez_log2fc,
+  organism = "human",
+  pvalueCutoff = 0.2,
+  by = "fgsea",
+  verbose = FALSE
+)
+```
+
+# Exporting results
+
+INKscape para montar imagens pro paper.
+
+```{r}
+# Brute counts matrix
+write.csv(cts_brute, file = "results/tables/bruteCts.csv")
+# Filtered counts matrix
+write.csv(cts, file = "results/tables/filtCts.csv")
+
+# Filtered gene annotations
+write.csv(all_features, file = "results/tables/geneAnnot.csv")
+
+# Brute metadata
+write.csv(meta_brute, file = "results/tables/bruteMeta.csv")
+# Cleaned metadata
+write.csv(meta, file = "results/tables/cleanMeta.csv")
+
+# Differential expression results
+write.csv(res_df, file = "results/tables/DEres.csv")
+# DEGS data frame
+write.csv(degs_df, file = "results/tables/DEGs.csv")
+
+# Functional analysis results
+write.csv()
+```
+
 # Alternative analysis
 
-## Collapsing replicates
+Despite indecisiveness if samples from the same donor should have been collapsed (added together) we decided to repeat the differential expression analysis like the original paper has, with all samples separated . However, we also performed the following alternative analysis below for comparison.
+
+## Collapsing replicates (by donor)
 
 ```{r}
 # Meta collapsed
@@ -1351,6 +1733,12 @@ kable(degs_df_collapsed[1:20,], format = "html", caption = "Top 20 DEGs") %>%
 #save_kable("degs.html", res_table)
 ```
 
+## Collapsing replicates (by differentiation protocol)
+
+```{r}
+
+```
+
 ## Removing ATCC samples
 
 ```{r}
@@ -1372,184 +1760,4 @@ ctsAdjDS <- ComBat_seq(
 
 ctsAdj <- cbind(ctsAdjCT, ctsAdjDS)
 ctsAdj <- ctsAdj[,match(colnames(cts), colnames(ctsAdj))]
-```
-
-# Comparing results
-
-## Venn Diagram of DEGs
-
-```{r}
-# List of lists of DEGs
-all_degs <- list(original = degs_orig, replication = degs)
-
-venn <- ggvenn(
-  all_degs, 
-  fill_color = c("#0073C2FF", "#EFC000FF"),
-  stroke_size = 0.5, 
-  set_name_size = 4
-  )
-print(venn)
-ggsave("results/venn.png", plot = venn, height = 5, width = 5)
-
-intersec_degs <- degs[degs %in% degs_orig]
-```
-
-# Functional analysis {#gsea}
-
-GO:0016322 -\> neuron remodelling / synaptic pruning
-
-<https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html>
-
-## Over representation analysis
-
-GO, KEGG and REACTOME.
-
-```{r}
-# Finding GO enriched sets
-ego <- list()
-for (i in c("all", "BP", "CC", "MF")) {
-  ego[[i]] <- enrichGO(
-    keyType = "SYMBOL",
-    gene = degs,
-    universe = sample_genes, # sample genes. IMPORTANT!!!
-    OrgDb = org.Hs.eg.db,
-    ont = i,
-    #pAdjustMethod = "bonferroni",
-    pvalueCutoff = 0.05,
-    qvalueCutoff = 0.05,
-    readable = TRUE
-  )
-}
-
-# Barplots 
-BPbar <- barplot(ego$BP, showCategory = 5) + 
-  labs(title = "Biological Process") +
-  scale_fill_gradient(low = "#36013f", high = "lightblue")
-CCbar <- barplot(ego$CC, showCategory = 5) + 
-  labs(title = "Cellular Component") +
-  scale_fill_gradient(low = "darkred", high = "pink")
-MFbar <- barplot(ego$MF, showCategory = 5) + 
-  labs(title = "Molecular Function") +
-  scale_fill_gradient(low = "darkgreen", high = "lightgreen")
-
-# Ordering DEGs for over representation analysis
-geneList <- degs_df$log2FoldChange
-names(geneList) <- rownames(degs_df)
-
-# Network plots
-BPnet <- cnetplot(ego$BP, foldChange = geneList) + 
-  labs(title = "Biological Process") +
-  theme(plot.title = element_text(hjust = 0.5))
-CCnet <- cnetplot(ego$CC, foldChange = degs_df$log2FoldChange) + 
-  labs(title = "Cellular Component") +
-  theme(plot.title = element_text(hjust = 0.5))
-MFnet <- cnetplot(ego$MF, foldChange = degs_df$log2FoldChange) + 
-  labs(title = "Molecular Function") +
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Circle plots (careful with order)
-BPcirc <- cnetplot(ego$BP, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
-  labs(title = "Biological Process") +
-  theme(plot.title = element_text(hjust = 0.5))
-CCcirc <- cnetplot(ego$CC, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
-  labs(title = "Cellular Component") +
-  theme(plot.title = element_text(hjust = 0.5))
-MFcirc <- cnetplot(ego$MF, foldChange = degs_df$log2FoldChange, circular = TRUE, colorEdge = TRUE) + 
-  labs(title = "Molecular Function") +
-  theme(plot.title = element_text(hjust = 0.5))
-
-# EMA plots
-# egoBP_pt <- pairwise_termsim(ego$BP)
-# egoCC_pt <- pairwise_termsim(ego$CC)
-# egoMF_pt <- pairwise_termsim(ego$MF)
-# BPema <- emapplot(egoBP_pt)
-# CCema <- emapplot(egoCC_pt)
-# MFema <- emapplot(egoMF_pt)
-
-# Grouping plots
-overRepGO <- plot_grid(
-  BPbar, CCbar, MFbar, BPnet, CCnet, MFnet, BPcirc, CCcirc, MFcirc, 
-  labels = "AUTO", label_size = 40) +   
-  theme(plot.background = element_rect(fill = "white"))
-ggsave("overRepGO.png", plot = overRepGO, height = 35, width = 30)
-
-```
-
-## Gene set enrichment analysis
-
-```{r}
-# Ordering DEGs for GSEA
-aux_df <- degs_df[order(-degs_df$log2FoldChange),]
-geneList <- aux_df$log2FoldChange
-names(geneList) <- rownames(aux_df)
-
-# Running
-ggo <- list()
-for (i in c("BP", "CC", "MF")) {
-  ggo[[i]] <- gseGO(
-    geneList,
-    keyType = "SYMBOL",
-    OrgDb = org.Hs.eg.db,
-    eps = 1e-300, # more precise p-values
-    ont = i
-    #minGSSize = 100,
-    #maxGSSize = 500,
-    #pvalueCutoff = 0.05,
-    #verbose = FALSE
-  )
-}
-
-
-###################################### ARRUMAR!!!!
-
-# p1 <- gseaplot2(ggo$BP, geneSetID = 1, title = ggo$BP@result$Description[1])
-# p2 <- gseaplot2(ggo$BP, geneSetID = 2, title = ggo$BP@result$Description[2])
-# p3 <- gseaplot2(ggo$BP, geneSetID = 3, title = ggo$BP@result$Description[3])
-# p4 <- gseaplot2(ggo$BP, geneSetID = 4, title = ggo$BP@result$Description[4])
-# p5 <- gseaplot2(ggo$BP, geneSetID = 5, title = ggo$BP@result$Description[5])
-# p6 <- gseaplot2(ggo$BP, geneSetID = 6, title = ggo$BP@result$Description[6])
-# 
-# 
-# 
-# gsea_combined <- plot_grid(plotlist = p1, labels = "AUTO")
-# ggsave("gsea.png", plot = gsea_combined, height = 30, width = 30)
-# 
-# gseaplot2(ggo$BP, geneSetID = 1:5)
-
-#gseaplot2(ggo$BP, geneSetID = 1:3, pvalue_table = TRUE, color = c("#E495A5", "#86B875", "#7DB0DD"))
-
-```
-
-## Signaling pathways
-
-```{r}
-
-hsa04110 <- pathview(gene.data  = geneList,
-                     pathway.id = "hsa04110",
-                     species    = "hsa",
-                     limit      = list(gene=max(abs(geneList)), cpd=1))
-```
-
-# Exporting results
-
-INKscape para montar imagens pro paper.
-
-```{r}
-# Brute counts matrix
-write_xlsx(cts_brute, "results/bruteCts.xlsx")
-# Filtered counts matrix
-write_xlsx(cts, "results/filtCts.xlsx")
-
-# Brute metadata
-write_xlsx(meta_brute, "results/bruteMeta.xlsx")
-# Cleaned metadata
-write_xlsx(meta, "results/cleanMeta.xlsx")
-
-# Differential expression results
-write_xlsx(res_df, "results/DEres.xlsx")
-# DEGS data frame
-write_xlsx(degs_df, "results/DEGs.xlsx")
-
-# Over representation GO results
-
 ```
